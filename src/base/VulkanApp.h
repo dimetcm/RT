@@ -7,14 +7,22 @@
 #include <windows.h>
 #include <crtdbg.h>
 
-
 class VulkanAppBase
 {
 public:
-	VulkanAppBase();
+	VulkanAppBase(const std::string& appName = "VulkanApp");
 	virtual ~VulkanAppBase();
 
 	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
+	virtual void FillInstanceExtensions(std::vector<const char*>& enabledInstanceExtensions) const;
+	
+	virtual void Init(const CommandLineOptions& options);
+private:
+	bool InitVulkan(bool enableValidation);
+	bool CreateInstance(bool enableValidation);
+
+private:
+	std::string m_appName;
 };
 
 template<class T>
@@ -29,5 +37,6 @@ int StartApp(const CommandLineArgs& args)
 	CommandLineOptions commandLineOptions;
 	app.RegisterCommandLineOptions(commandLineOptions);
 	commandLineOptions.Parse(args);
+	app.Init(commandLineOptions);
 	return 0;
 }
