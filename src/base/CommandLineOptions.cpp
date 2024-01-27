@@ -1,5 +1,4 @@
 #include "CommandLineOptions.h"
-#include "Win32Helpers.h"
 #include "CommandLineArgs.h"
 #include <assert.h>
 #include <iostream>
@@ -66,7 +65,6 @@ void CommandLineOptions::Parse(const CommandLineArgs& arguments)
     // Print help for unknown arguments or missing argument values
     if (printHelp || options["help"].isSet) 
     {
-        Win32Helpers::SetupConsole("Vulkan example");
         PrintHelp();
         std::cin.get();
         exit(0);

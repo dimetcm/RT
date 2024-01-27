@@ -3,6 +3,8 @@
 #include "CommandLineArgs.h"
 #include "CommandLineOptions.h"
 
+#include <vulkan/vulkan.h>
+
 #pragma comment(linker, "/subsystem:windows")
 #include <windows.h>
 #include <crtdbg.h>
@@ -16,12 +18,13 @@ public:
 	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
 	virtual void FillInstanceExtensions(std::vector<const char*>& enabledInstanceExtensions) const;
 	
-	virtual void Init(const CommandLineOptions& options);
+	virtual bool Init(const CommandLineOptions& options);
 private:
 	bool InitVulkan(bool enableValidation);
 	bool CreateInstance(bool enableValidation);
 
 private:
+	VkInstance m_vkInstance;
 	std::string m_appName;
 };
 

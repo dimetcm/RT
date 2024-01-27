@@ -1,6 +1,8 @@
 #include "VulkanApp.h"
+#include "Win32Helpers.h"
+#include "VulkanUtils.h"
+
 #include <ShellScalingAPI.h>
-#include <vulkan/vulkan.h>
 #include <iostream>
 
 #include <VulkanDebugUtils.h>
@@ -150,28 +152,37 @@ bool VulkanAppBase::CreateInstance(bool enableValidation)
 		}
 	}
 
-	VkInstance instance;
-	bool result = vkCreateInstance(&instanceCreateInfo, nullptr, &instance) == VK_SUCCESS;
+	VkResult vkResult = vkCreateInstance(&instanceCreateInfo, nullptr, &m_vkInstance);
+	if (vkResult != VK_SUCCESS)
+	{
+		VulkanUtils::FatalExit("Could not create Vulkan instance : \n" + VulkanUtils::VkResultToString(vkResult), vkResult);
+	}
 
 	// If the debug utils extension is present we set up debug functions, so samples can label objects for debugging
 	if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
 		!= supportedInstanceExtensions.end())
 	{
-		VulkanDebugUtils::Setup(instance);
+		VulkanDebugUtils::Setup(m_vkInstance);
 	}
 
-	return result;
+	return vkResult == VK_SUCCESS;
 }
-
 
 bool VulkanAppBase::InitVulkan(bool enableValidation)
 {
-    return CreateInstance(enableValidation);
+	bool result = CreateInstance(enableValidation);
+	return result;
 }
 
-void VulkanAppBase::Init(const CommandLineOptions& options)
+bool VulkanAppBase::Init(const CommandLineOptions& options)
 {
+	Win32Helpers::SetupConsole(m_appName);
     SetupDPIAwareness();
 	const bool enableValidation = options.IsSet("validation");
-    InitVulkan(enableValidation);
+	bool initResult = InitVulkan(enableValidation);
+    if (!initResult)
+	{
+		std::cerr << "Failed to init vulkan\n";
+	}
+	return initResult;
 }
