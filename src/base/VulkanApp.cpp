@@ -171,6 +171,13 @@ bool VulkanAppBase::CreateInstance(bool enableValidation)
 bool VulkanAppBase::InitVulkan(bool enableValidation)
 {
 	bool result = CreateInstance(enableValidation);
+
+	// If requested, we enable the default validation layers for debugging
+	if (enableValidation)
+	{
+		VulkanDebugUtils::SetupDebugging(m_vkInstance);
+	}
+
 	return result;
 }
 

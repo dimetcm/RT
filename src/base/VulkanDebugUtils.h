@@ -5,4 +5,5 @@
 namespace VulkanDebugUtils
 {
     void Setup(VkInstance instance);
+    void SetupDebugging(VkInstance instance);
 }
