@@ -1,27 +1,21 @@
 #pragma once
 
-#include <vector>
-#include <concepts>
+#include "CommandLineArgs.h"
+#include "CommandLineOptions.h"
 
 #pragma comment(linker, "/subsystem:windows")
 #include <windows.h>
 #include <crtdbg.h>
 
-struct CommandLineArgs
-{
-	CommandLineArgs();
-	CommandLineArgs(int argc, char** argv);
-
-	std::vector<const char*> args;
-};
 
 class VulkanAppBase
 {
 public:
-	VulkanAppBase() {}
-	int Run() { return 0; } 
-};
+	VulkanAppBase();
+	virtual ~VulkanAppBase();
 
+	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
+};
 
 template<class T>
 requires std::derived_from<T, VulkanAppBase>
@@ -32,5 +26,8 @@ int StartApp(const CommandLineArgs& args)
 #endif
 
 	T app;
-	return app.Run();	
+	CommandLineOptions commandLineOptions;
+	app.RegisterCommandLineOptions(commandLineOptions);
+	commandLineOptions.Parse(args);
+	return 0;
 }
