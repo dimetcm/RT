@@ -22,6 +22,8 @@ void VulkanAppBase::RegisterCommandLineOptions(CommandLineOptions& options) cons
     options.Add("fullscreen", { "-f", "--fullscreen" }, false, "Start in fullscreen mode");
     options.Add("width", { "-w", "--width" }, true, "Set window width");
     options.Add("height", { "-h", "--height" }, true, "Set window height");
+	options.Add("gpuidx", { "-g", "--gpu" }, 1, "Select GPU to run on");
+	options.Add("gpulist", { "-gl", "--listgpus" }, 0, "Display a list of available Vulkan devices");
 }
 
 static void SetupDPIAwareness()
@@ -43,9 +45,14 @@ static void SetupDPIAwareness()
 	}
 }
 
-void VulkanAppBase::FillInstanceExtensions(std::vector<const char*>& enabledInstanceExtensions) const
-{
-}
+void VulkanAppBase::EnableInstanceExtensions(std::vector<const char*>& enabledInstanceExtensions) const
+{}
+
+void VulkanAppBase::EnablePhysicalDeviceFeatures(VkPhysicalDeviceFeatures& enabledFeatures) const
+{}
+
+void VulkanAppBase::EnablePhysicalDeviceExtentions(std::vector<const char*> enabledDeviceExtensions) const
+{}
 
 bool VulkanAppBase::CreateInstance(bool enableValidation)
 {
@@ -81,7 +88,7 @@ bool VulkanAppBase::CreateInstance(bool enableValidation)
 	}
 
 	std::vector<const char*> enabledInstanceExtensions;
-	FillInstanceExtensions(enabledInstanceExtensions);
+	EnableInstanceExtensions(enabledInstanceExtensions);
 
 	// Enabled requested instance extensions
 	if (enabledInstanceExtensions.size() > 0) 
@@ -168,9 +175,13 @@ bool VulkanAppBase::CreateInstance(bool enableValidation)
 	return vkResult == VK_SUCCESS;
 }
 
-bool VulkanAppBase::InitVulkan(bool enableValidation)
+bool VulkanAppBase::InitVulkan(bool enableValidation, std::optional<uint32_t> preferedGPUIdx, bool listDevices)
 {
-	bool result = CreateInstance(enableValidation);
+	if (!CreateInstance(enableValidation))
+	{
+		VulkanUtils::FatalExit("failed to vreate Vk instance", -1);
+		return false;
+	}
 
 	// If requested, we enable the default validation layers for debugging
 	if (enableValidation)
@@ -178,7 +189,104 @@ bool VulkanAppBase::InitVulkan(bool enableValidation)
 		VulkanDebugUtils::SetupDebugging(m_vkInstance);
 	}
 
-	return result;
+	// Physical device
+	uint32_t gpuCount = 0;
+	// Get number of available physical devices
+	VK_CHECK_RESULT(vkEnumeratePhysicalDevices(m_vkInstance, &gpuCount, nullptr));
+	if (gpuCount == 0) 
+	{
+		VulkanUtils::FatalExit("No device with Vulkan support found", -1);
+		return false;
+	}
+
+	// Enumerate devices
+	std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
+	VkResult err = vkEnumeratePhysicalDevices(m_vkInstance, &gpuCount, physicalDevices.data());
+	if (err)
+	{
+		VulkanUtils::FatalExit("Could not enumerate physical devices : \n" + VulkanUtils::VkResultToString(err), err);
+		return false;
+	}
+
+	// GPU selection
+
+	// Select physical device to be used for the Vulkan app
+	// Defaults to the first discrete device unless specified by command line
+	uint32_t selectedDevice = 0;
+
+	// GPU selection via an option
+	if (preferedGPUIdx)
+	{
+		uint32_t index = preferedGPUIdx.value();
+		if (index > gpuCount - 1) 
+		{
+			std::cerr << "Selected device index " << index << 
+				" is out of range, reverting to device 0 (use -listgpus to show available Vulkan devices)" << "\n";
+		}
+		else 
+		{
+			selectedDevice = index;
+		}
+	}
+	else
+	{
+		for (uint32_t i = 0; i < gpuCount; ++i)
+		{
+			VkPhysicalDeviceProperties deviceProperties;
+			vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
+			if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+			{
+				selectedDevice = i;
+				break;
+			}
+		}
+	}
+
+	if (listDevices)
+	{
+		std::cout << "Available Vulkan devices" << "\n";
+		for (uint32_t i = 0; i < gpuCount; ++i)
+		{
+			VkPhysicalDeviceProperties deviceProperties;
+			vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
+			std::cout << "Device [" << i << "] : " << deviceProperties.deviceName << std::endl;
+			std::cout << " Type: " << VulkanUtils::VkPhysicalDeviceTypeToString(deviceProperties.deviceType) << "\n";
+			std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "." <<
+				((deviceProperties.apiVersion >> 12) & 0x3ff) << "." << (deviceProperties.apiVersion & 0xfff) << "\n";
+		}
+	}
+
+	m_vkPhysicalDevice = physicalDevices[selectedDevice];
+
+	// Store properties (including limits), features and memory properties of the physical device (so that app can check against them)
+	vkGetPhysicalDeviceProperties(m_vkPhysicalDevice, &m_deviceProperties);
+	std::cout << "Selected device: " << m_deviceProperties.deviceName << std::endl;
+
+	// Get list of supported extensions
+	uint32_t extCount = 0;
+	vkEnumerateDeviceExtensionProperties(m_vkPhysicalDevice, nullptr, &extCount, nullptr);
+	if (extCount > 0)
+	{
+		std::vector<VkExtensionProperties> extensions(extCount);
+		if (vkEnumerateDeviceExtensionProperties(m_vkPhysicalDevice, nullptr, &extCount, &extensions.front()) == VK_SUCCESS)
+		{
+			for (auto ext : extensions)
+			{
+				m_supportedExtensions.push_back(ext.extensionName);
+			}
+		}
+	}
+
+	vkGetPhysicalDeviceFeatures(m_vkPhysicalDevice, &m_deviceFeatures);
+	vkGetPhysicalDeviceMemoryProperties(m_vkPhysicalDevice, &m_deviceMemoryProperties);
+
+	VkPhysicalDeviceFeatures enabledFeatures{};
+	EnablePhysicalDeviceFeatures(enabledFeatures);
+
+	std::vector<const char*> enabledDeviceExtensions;
+	EnablePhysicalDeviceExtentions(enabledDeviceExtensions);
+
+	return true;
 }
 
 bool VulkanAppBase::Init(const CommandLineOptions& options)
@@ -186,10 +294,20 @@ bool VulkanAppBase::Init(const CommandLineOptions& options)
 	Win32Helpers::SetupConsole(m_appName);
     SetupDPIAwareness();
 	const bool enableValidation = options.IsSet("validation");
-	bool initResult = InitVulkan(enableValidation);
+	std::optional<uint32_t> preferedGPUIdx;
+	if (options.IsSet("gpuidx"))
+	{
+		preferedGPUIdx = options.GetValueAsInt("gpuidx", 0); 
+	}
+	bool initResult = InitVulkan(enableValidation, preferedGPUIdx, options.IsSet("gpulist"));
     if (!initResult)
 	{
 		std::cerr << "Failed to init vulkan\n";
 	}
 	return initResult;
+}
+
+bool VulkanAppBase::IsExtensionSupported(const std::string& extension) const
+{
+	return (std::find(m_supportedExtensions.begin(), m_supportedExtensions.end(), extension) != m_supportedExtensions.end());
 }
