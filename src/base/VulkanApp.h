@@ -27,19 +27,31 @@ public:
 	bool IsExtensionSupported(const std::string& extension) const;
 private:
 	bool InitVulkan(bool enableValidation, std::optional<uint32_t> preferedGPUIdx, bool listDevices);
-	bool CreateInstance(bool enableValidation);
+	bool CreateVulkanInstance(bool enableValidation);
+	bool CreateVulkanDevice(const VkPhysicalDeviceFeatures& enabledFeatures,
+							const std::vector<const char*>& enabledExtensions,
+							VkQueueFlags requestedQueueTypes);
 
+	uint32_t GetQueueFamilyIndex(const std::vector<VkQueueFamilyProperties>& queueFamilyProperties, VkQueueFlags queueFlags) const;
 private:
 	VkInstance m_vkInstance;
 	VkPhysicalDevice m_vkPhysicalDevice;
+	VkDevice m_vkDevice;
 	// Stores physical device properties (for e.g. checking device limits)
 	VkPhysicalDeviceProperties m_deviceProperties{};
 	// Stores the features available on the selected physical device (for e.g. checking if a feature is available)
 	VkPhysicalDeviceFeatures m_deviceFeatures{};
 	// Stores all available memory (type) properties for the physical device
 	VkPhysicalDeviceMemoryProperties m_deviceMemoryProperties{};
-	// List of extensions supported by the device
+	// extensions supported by the device
 	std::vector<std::string> m_supportedExtensions;
+	// contains queue family indices
+	struct
+	{
+		uint32_t graphics;
+		uint32_t compute;
+		uint32_t transfer;
+	} m_queueFamilyIndices;
 
 	std::string m_appName;
 };
@@ -52,10 +64,13 @@ int StartApp(const CommandLineArgs& args)
 	_CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 #endif
 
-	T app;
-	CommandLineOptions commandLineOptions;
-	app.RegisterCommandLineOptions(commandLineOptions);
-	commandLineOptions.Parse(args);
-	app.Init(commandLineOptions);
+	{
+		T app;
+		CommandLineOptions commandLineOptions;
+		app.RegisterCommandLineOptions(commandLineOptions);
+		commandLineOptions.Parse(args);
+		app.Init(commandLineOptions);
+	}
+	system("pause");
 	return 0;
 }
