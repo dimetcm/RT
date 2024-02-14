@@ -223,6 +223,17 @@ uint32_t VulkanAppBase::GetQueueFamilyIndex(const std::vector<VkQueueFamilyPrope
 	return UINT32_MAX;
 }
 
+VkCommandPool VulkanAppBase::CreateCommandPool(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags createFlags)
+{
+	VkCommandPoolCreateInfo cmdPoolInfo = {};
+	cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
+	cmdPoolInfo.flags = createFlags;
+	VkCommandPool cmdPool;
+	VK_CHECK_RESULT(vkCreateCommandPool(m_vkDevice, &cmdPoolInfo, nullptr, &cmdPool));
+	return cmdPool;
+}
+
 bool VulkanAppBase::CreateVulkanDevice(const VkPhysicalDeviceFeatures& enabledFeatures,
 	const std::vector<const char*>& enabledExtensions, VkQueueFlags requestedQueueTypes)
 {
@@ -443,6 +454,10 @@ bool VulkanAppBase::InitVulkan(bool enableValidation, std::optional<uint32_t> pr
 	EnablePhysicalDeviceExtentions(enabledDeviceExtensions);
 
 	CreateVulkanDevice(enabledFeatures, enabledDeviceExtensions, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT);
+
+	m_graphicsCommandPool = CreateCommandPool(m_queueFamilyIndices.graphics);
+
+	vkGetDeviceQueue(m_vkDevice, m_queueFamilyIndices.graphics, 0, &m_graphicsQueue);
 
 	return true;
 }

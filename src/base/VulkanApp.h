@@ -31,12 +31,19 @@ private:
 	bool CreateVulkanDevice(const VkPhysicalDeviceFeatures& enabledFeatures,
 							const std::vector<const char*>& enabledExtensions,
 							VkQueueFlags requestedQueueTypes);
+	VkCommandPool CreateCommandPool(uint32_t queueFamilyIndex,
+		VkCommandPoolCreateFlags createFlags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
 	uint32_t GetQueueFamilyIndex(const std::vector<VkQueueFamilyProperties>& queueFamilyProperties, VkQueueFlags queueFlags) const;
 private:
 	VkInstance m_vkInstance;
 	VkPhysicalDevice m_vkPhysicalDevice;
+	// Vk logical device
 	VkDevice m_vkDevice;
+	// Handle to the command pool for allocating graphics command buffers 
+	VkCommandPool m_graphicsCommandPool = VK_NULL_HANDLE;
+	// Handle to the device graphics queue that command buffers are submitted to
+	VkQueue m_graphicsQueue{ VK_NULL_HANDLE };
 	// Stores physical device properties (for e.g. checking device limits)
 	VkPhysicalDeviceProperties m_deviceProperties{};
 	// Stores the features available on the selected physical device (for e.g. checking if a feature is available)
