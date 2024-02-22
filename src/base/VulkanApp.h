@@ -22,11 +22,13 @@ public:
 	virtual void EnablePhysicalDeviceFeatures(VkPhysicalDeviceFeatures& enabledFeatures) const;
 	virtual void EnablePhysicalDeviceExtentions(std::vector<const char*> enabledDeviceExtensions) const;
 
-	virtual bool Init(const CommandLineOptions& options);
+	virtual bool Init(HINSTANCE hInstance, const CommandLineOptions& options);
 
 	bool IsExtensionSupported(const std::string& extension) const;
 private:
 	bool InitVulkan(bool enableValidation, std::optional<uint32_t> preferedGPUIdx, bool listDevices);
+	HWND SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t height, bool fullscreen);
+
 	bool CreateVulkanInstance(bool enableValidation);
 	bool CreateVulkanDevice(const VkPhysicalDeviceFeatures& enabledFeatures,
 							const std::vector<const char*>& enabledExtensions,
@@ -59,13 +61,13 @@ private:
 		uint32_t compute;
 		uint32_t transfer;
 	} m_queueFamilyIndices;
-
+	
 	std::string m_appName;
 };
 
 template<class T>
 requires std::derived_from<T, VulkanAppBase>
-int StartApp(const CommandLineArgs& args)
+int StartApp(HINSTANCE hInstance, const CommandLineArgs& args)
 {
 #if defined(DEBUG) | defined(_DEBUG)
 	_CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
@@ -76,7 +78,7 @@ int StartApp(const CommandLineArgs& args)
 		CommandLineOptions commandLineOptions;
 		app.RegisterCommandLineOptions(commandLineOptions);
 		commandLineOptions.Parse(args);
-		app.Init(commandLineOptions);
+		app.Init(hInstance, commandLineOptions);
 	}
 	system("pause");
 	return 0;

@@ -2,5 +2,5 @@
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPSTR cmdLine, int showCmd)
 {
-    return StartApp<VulkanAppBase>(CommandLineArgs(__argc, __argv));
+    return StartApp<VulkanAppBase>(hInstance, CommandLineArgs(__argc, __argv));
 }

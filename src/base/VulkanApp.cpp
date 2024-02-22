@@ -13,6 +13,8 @@ VulkanAppBase::VulkanAppBase(const std::string& appName)
 
 VulkanAppBase::~VulkanAppBase()
 {
+	vkDestroyCommandPool(m_vkDevice, m_graphicsCommandPool, nullptr);
+
 	vkDestroyDevice(m_vkDevice, nullptr);
 	VulkanDebugUtils::FreeDebugCallback(m_vkInstance);
 	vkDestroyInstance(m_vkInstance, nullptr);
@@ -462,7 +464,121 @@ bool VulkanAppBase::InitVulkan(bool enableValidation, std::optional<uint32_t> pr
 	return true;
 }
 
-bool VulkanAppBase::Init(const CommandLineOptions& options)
+LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
+}
+
+HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t height, bool fullscreen)
+{
+	WNDCLASSEX wndClass;
+
+	wndClass.cbSize = sizeof(WNDCLASSEX);
+	wndClass.style = CS_HREDRAW | CS_VREDRAW;
+	wndClass.lpfnWndProc = WndProc;
+	wndClass.cbClsExtra = 0;
+	wndClass.cbWndExtra = 0;
+	wndClass.hInstance = hInstance;
+	wndClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+	wndClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
+	wndClass.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+	wndClass.lpszMenuName = nullptr;
+	wndClass.lpszClassName = m_appName.c_str();
+	wndClass.hIconSm = LoadIcon(nullptr, IDI_WINLOGO);
+
+	if (!RegisterClassEx(&wndClass))
+	{
+		VulkanUtils::FatalExit("Could not register window class!\n", 1);
+	}
+
+	int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+	int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+
+	if (fullscreen)
+	{
+		if ((width != (uint32_t)screenWidth) && (height != (uint32_t)screenHeight))
+		{
+			DEVMODE dmScreenSettings;
+			memset(&dmScreenSettings, 0, sizeof(dmScreenSettings));
+			dmScreenSettings.dmSize       = sizeof(dmScreenSettings);
+			dmScreenSettings.dmPelsWidth  = width;
+			dmScreenSettings.dmPelsHeight = height;
+			dmScreenSettings.dmBitsPerPel = 32;
+			dmScreenSettings.dmFields     = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
+			if (ChangeDisplaySettings(&dmScreenSettings, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
+			{
+				if (MessageBox(nullptr, "Fullscreen Mode not supported!\n Switch to window mode?", "Error", MB_YESNO | MB_ICONEXCLAMATION) == IDYES)
+				{
+					fullscreen = false;
+				}
+				else
+				{
+					return nullptr;
+				}
+			}
+			screenWidth = width;
+			screenHeight = height;
+		}
+
+	}
+
+	DWORD dwExStyle;
+	DWORD dwStyle;
+
+	if (fullscreen)
+	{
+		dwExStyle = WS_EX_APPWINDOW;
+		dwStyle = WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+	}
+	else
+	{
+		dwExStyle = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+		dwStyle = WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+	}
+
+	RECT windowRect;
+	windowRect.left = 0L;
+	windowRect.top = 0L;
+	windowRect.right = fullscreen ? (long)screenWidth : (long)width;
+	windowRect.bottom = fullscreen ? (long)screenHeight : (long)height;
+
+	AdjustWindowRectEx(&windowRect, dwStyle, false, dwExStyle);
+
+	HWND window = CreateWindowEx(0,
+		m_appName.c_str(),
+		m_appName.c_str(),
+		dwStyle | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+		0,
+		0,
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
+		nullptr,
+		nullptr,
+		hInstance,
+		nullptr);
+
+	if (!fullscreen)
+	{
+		// Center on screen
+		uint32_t x = (GetSystemMetrics(SM_CXSCREEN) - windowRect.right) / 2;
+		uint32_t y = (GetSystemMetrics(SM_CYSCREEN) - windowRect.bottom) / 2;
+		SetWindowPos(window, 0, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+	}
+
+	if (!window)
+	{
+		VulkanUtils::FatalExit("Could not create window!\n", 1);
+		return nullptr;
+	}
+
+	ShowWindow(window, SW_SHOW);
+	SetForegroundWindow(window);
+	SetFocus(window);
+
+	return window;
+} 
+
+bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 {
 	Win32Helpers::SetupConsole(m_appName);
     SetupDPIAwareness();
@@ -477,6 +593,12 @@ bool VulkanAppBase::Init(const CommandLineOptions& options)
 	{
 		std::cerr << "Failed to init vulkan\n";
 	}
+
+	bool fullscreen = options.IsSet("fullscreen");
+	uint32_t width = options.GetValueAsInt("width", 800);
+	uint32_t height = options.GetValueAsInt("height", 600);
+	SetupWindow(hInstance, width, height, fullscreen);
+
 	return initResult;
 }
 
