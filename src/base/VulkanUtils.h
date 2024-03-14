@@ -14,13 +14,20 @@ namespace VulkanUtils
     std::string VkPhysicalDeviceTypeToString(VkPhysicalDeviceType type);
 }
 
-#define VK_CHECK_RESULT(f)																				\
+#define VK_CHECK_RESULT_MSG(f, errorDesciption)															\
 {																										\
-	VkResult res = (f);																					\
-	if (res != VK_SUCCESS)																				\
-	{																									\
-		std::cout << "Fatal : VkResult is \"" << VulkanUtils:: VkResultToString(res) << "\" in " << __FILE__ << " at line " << __LINE__ << "\n"; \
-		assert(res == VK_SUCCESS);																		\
-	}																									\
+	do {																								\
+		VkResult res = (f);																				\
+		if (res != VK_SUCCESS)																			\
+		{																								\
+			std::cerr << "Fatal : VkResult is \"" << VulkanUtils:: VkResultToString(res) << "\" in " << __FILE__ << " at line " << __LINE__ << "\n"; \
+			assert(res == VK_SUCCESS);																	\
+			VulkanUtils::FatalExit(errorDesciption, res);												\
+		}																								\
+	} while(false);																						\
 }
 
+#define VK_CHECK_RESULT(f)									\
+{															\
+	VK_CHECK_RESULT_MSG(f, "No error desciption provided")	\
+}															\

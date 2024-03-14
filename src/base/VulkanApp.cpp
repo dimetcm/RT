@@ -9,6 +9,8 @@
 
 #include <VulkanDebugUtils.h>
 
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
 const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
 
 const std::vector<const char*> validationLayers = {
@@ -75,13 +77,41 @@ VulkanAppBase::VulkanAppBase(const std::string& appName)
 
 VulkanAppBase::~VulkanAppBase()
 {
-	vkDestroySwapchainKHR(m_vkDevice, m_swapChain, nullptr);
+	CleanupSwapChain();
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+	{
+		vkDestroySemaphore(m_vkDevice, m_renderFinishedSemaphores[i], nullptr);
+		vkDestroySemaphore(m_vkDevice, m_imageAvailableSemaphores[i], nullptr);
+		vkDestroySemaphore(m_vkDevice, m_computeFinishedSemaphores[i], nullptr);
+		vkDestroyFence(m_vkDevice, m_graphicsInFlightFences[i], nullptr);
+		vkDestroyFence(m_vkDevice, m_computeInFlightFences[i], nullptr);
+	}
+
+	vkDestroyRenderPass(m_vkDevice, m_renderPass, nullptr);
 
 	vkDestroySurfaceKHR(m_vkInstance, m_surface, nullptr);
+
+	vkDestroyCommandPool(m_vkDevice, m_commandPool, nullptr);
 
 	vkDestroyDevice(m_vkDevice, nullptr);
 	VulkanDebugUtils::FreeDebugCallback(m_vkInstance);
 	vkDestroyInstance(m_vkInstance, nullptr);
+}
+
+void VulkanAppBase::CleanupSwapChain()
+{
+	for (VkFramebuffer framebuffer : m_swapChainFramebuffers) 
+	{
+		vkDestroyFramebuffer(m_vkDevice, framebuffer, nullptr);
+	}
+
+	for (VkImageView imageView : m_swapChainImageViews)
+	{
+		vkDestroyImageView(m_vkDevice, imageView, nullptr);
+	}
+
+	vkDestroySwapchainKHR(m_vkDevice, m_swapChain, nullptr);
 }
 
 void VulkanAppBase::RegisterCommandLineOptions(CommandLineOptions& options) const
@@ -192,11 +222,8 @@ bool VulkanAppBase::CreateVulkanInstance(bool enableValidation)
 		}
 	}
 
-	VkResult vkResult = vkCreateInstance(&instanceCreateInfo, nullptr, &m_vkInstance);
-	if (vkResult != VK_SUCCESS)
-	{
-		VulkanUtils::FatalExit("Could not create Vulkan instance : \n" + VulkanUtils::VkResultToString(vkResult), vkResult);
-	}
+	VK_CHECK_RESULT_MSG(vkCreateInstance(&instanceCreateInfo, nullptr, &m_vkInstance),
+		"Could not create Vulkan instance!");
 
 	if (enableValidation)
 	{
@@ -207,18 +234,20 @@ bool VulkanAppBase::CreateVulkanInstance(bool enableValidation)
 		}
 	}
 
-	return vkResult == VK_SUCCESS;
+	return true;
 }
 
-VkCommandPool VulkanAppBase::CreateCommandPool(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags createFlags)
+void VulkanAppBase::CreateCommandPool()
 {
-	VkCommandPoolCreateInfo cmdPoolInfo = {};
-	cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
-	cmdPoolInfo.flags = createFlags;
-	VkCommandPool cmdPool;
-	VK_CHECK_RESULT(vkCreateCommandPool(m_vkDevice, &cmdPoolInfo, nullptr, &cmdPool));
-	return cmdPool;
+	QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(m_vkPhysicalDevice, m_surface);
+
+	VkCommandPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsAndComputeFamily.value();
+
+	VK_CHECK_RESULT_MSG(vkCreateCommandPool(m_vkDevice, &poolInfo, nullptr, &m_commandPool),
+		"Failed to create command pool!");
 }
 
 static bool CheckDeviceExtensionSupport(VkPhysicalDevice device) {
@@ -318,11 +347,12 @@ bool VulkanAppBase::CreateVulkanLogicalDevice(bool enableValidationLayers)
 		createInfo.enabledLayerCount = 0;
 	}
 
-	VkResult result = vkCreateDevice(m_vkPhysicalDevice, &createInfo, nullptr, &m_vkDevice);
-	if (result != VK_SUCCESS)
-	{
-		VulkanUtils::FatalExit("failed to create logical device!", result);
-	} 
+	VK_CHECK_RESULT_MSG(vkCreateDevice(m_vkPhysicalDevice, &createInfo, nullptr, &m_vkDevice),
+		"Failed to create logical device!");
+
+	vkGetDeviceQueue(m_vkDevice, indices.graphicsAndComputeFamily.value(), 0, &m_graphicsQueue);
+	vkGetDeviceQueue(m_vkDevice, indices.graphicsAndComputeFamily.value(), 0, &m_computeQueue);
+	vkGetDeviceQueue(m_vkDevice, indices.presentFamily.value(), 0, &m_presentQueue);
 
 	return true;
 }
@@ -332,7 +362,7 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
 {
 	if (!CreateVulkanInstance(enableValidation))
 	{
-		VulkanUtils::FatalExit("failed to vreate Vk instance", -1);
+		VulkanUtils::FatalExit("Failed to vreate Vk instance", -1);
 		return false;
 	}
 
@@ -347,11 +377,9 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
 	surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
 	surfaceCreateInfo.hinstance = hInstance;
 	surfaceCreateInfo.hwnd = hwnd;
-	VkResult result = vkCreateWin32SurfaceKHR(m_vkInstance, &surfaceCreateInfo, nullptr, &m_surface);
-	if (result != VK_SUCCESS)
-	{
-		VulkanUtils::FatalExit("Can't create surface", result);
-	}
+	VK_CHECK_RESULT_MSG(vkCreateWin32SurfaceKHR(m_vkInstance, &surfaceCreateInfo, nullptr, &m_surface),
+		"Can't create surface");
+
 	// Physical device
 	uint32_t gpuCount = 0;
 	// Get number of available physical devices
@@ -364,12 +392,8 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
 
 	// Enumerate devices
 	std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-	result = vkEnumeratePhysicalDevices(m_vkInstance, &gpuCount, physicalDevices.data());
-	if (result != VK_SUCCESS)
-	{
-		VulkanUtils::FatalExit("Could not enumerate physical devices : \n" + VulkanUtils::VkResultToString(result), result);
-		return false;
-	}
+	VK_CHECK_RESULT_MSG(vkEnumeratePhysicalDevices(m_vkInstance, &gpuCount, physicalDevices.data()),
+		"Could not enumerate physical devices");
 
 	// GPU selection
 
@@ -445,6 +469,7 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
 	vkGetPhysicalDeviceMemoryProperties(m_vkPhysicalDevice, &m_deviceMemoryProperties);
 
 	CreateVulkanLogicalDevice(enableValidation);
+	CreateCommandPool();
 
 	return true;
 }
@@ -664,10 +689,8 @@ void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, HWND hwnd, uint32_t wid
 	createInfo.presentMode = presentMode;
 	createInfo.clipped = VK_TRUE;
 
-	if (VkResult result = vkCreateSwapchainKHR(m_vkDevice, &createInfo, nullptr, &m_swapChain); result != VK_SUCCESS)
-	{
-		VulkanUtils::FatalExit("Failed to create swap chain!", result);
-	}
+	VK_CHECK_RESULT_MSG(vkCreateSwapchainKHR(m_vkDevice, &createInfo, nullptr, &m_swapChain),
+		"Failed to create swap chain!");
 
 	vkGetSwapchainImagesKHR(m_vkDevice, m_swapChain, &imageCount, nullptr);
 	m_swapChainImages.resize(imageCount);
@@ -675,6 +698,136 @@ void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, HWND hwnd, uint32_t wid
 
 	m_swapChainImageFormat = surfaceFormat.format;
 	m_swapChainExtent = extent;
+}
+
+void VulkanAppBase::CreateSwapChainImageViews()
+{
+	m_swapChainImageViews.resize(m_swapChainImages.size());
+
+	for (size_t i = 0; i < m_swapChainImages.size(); i++) 
+	{
+		VkImageViewCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		createInfo.image = m_swapChainImages[i];
+		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		createInfo.format = m_swapChainImageFormat;
+		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		createInfo.subresourceRange.baseMipLevel = 0;
+		createInfo.subresourceRange.levelCount = 1;
+		createInfo.subresourceRange.baseArrayLayer = 0;
+		createInfo.subresourceRange.layerCount = 1;
+
+		VK_CHECK_RESULT_MSG(vkCreateImageView(m_vkDevice, &createInfo, nullptr, &m_swapChainImageViews[i]),
+			"Failed to create image views!");
+	}
+}
+
+void VulkanAppBase::CreateRenderPass()
+{
+	VkAttachmentDescription colorAttachment{};
+	colorAttachment.format = m_swapChainImageFormat;
+	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+	VkAttachmentReference colorAttachmentRef{};
+	colorAttachmentRef.attachment = 0;
+	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription subpass{};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachmentRef;
+
+	VkSubpassDependency dependency{};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.srcAccessMask = 0;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+	VkRenderPassCreateInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassInfo.attachmentCount = 1;
+	renderPassInfo.pAttachments = &colorAttachment;
+	renderPassInfo.subpassCount = 1;
+	renderPassInfo.pSubpasses = &subpass;
+	renderPassInfo.dependencyCount = 1;
+	renderPassInfo.pDependencies = &dependency;
+
+	VK_CHECK_RESULT_MSG(vkCreateRenderPass(m_vkDevice, &renderPassInfo, nullptr, &m_renderPass),
+		"Failed to create render pass!");
+}
+
+void VulkanAppBase::CreateGraphicsCommandBuffers()
+{
+	m_graphicsCommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.commandPool = m_commandPool;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandBufferCount = static_cast<uint32_t>(m_graphicsCommandBuffers.size());
+
+	VK_CHECK_RESULT_MSG(vkAllocateCommandBuffers(m_vkDevice, &allocInfo, m_graphicsCommandBuffers.data()),
+		"Failed to allocate graphics command buffers!");
+}
+
+void VulkanAppBase::CreateComputeCommandBuffers()
+{
+	m_computeCommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.commandPool = m_commandPool;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandBufferCount = static_cast<uint32_t>(m_computeCommandBuffers.size());
+
+	VK_CHECK_RESULT_MSG(vkAllocateCommandBuffers(m_vkDevice, &allocInfo, m_computeCommandBuffers.data()),
+		"Failed to allocate compute command buffers!");
+}
+
+void VulkanAppBase::CreateSyncObjects()
+{
+	m_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	m_renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	m_computeFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	m_graphicsInFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+	m_computeInFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+	VkSemaphoreCreateInfo semaphoreInfo{};
+	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	VkFenceCreateInfo fenceInfo{};
+	fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+	{
+		VK_CHECK_RESULT_MSG(vkCreateSemaphore(m_vkDevice, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]),
+			"Failed to create image available semaphore!");
+
+		VK_CHECK_RESULT_MSG(vkCreateSemaphore(m_vkDevice, &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]),
+			"Failed to create render finished semaphore!");
+
+		VK_CHECK_RESULT_MSG(vkCreateFence(m_vkDevice, &fenceInfo, nullptr, &m_graphicsInFlightFences[i]), 
+			"Failed to create graphics frame fence!");
+
+		VK_CHECK_RESULT_MSG(vkCreateSemaphore(m_vkDevice, &semaphoreInfo, nullptr, &m_computeFinishedSemaphores[i]),
+			"Failed to create compute finished semaphore!");
+
+		VK_CHECK_RESULT_MSG(vkCreateFence(m_vkDevice, &fenceInfo, nullptr, &m_computeInFlightFences[i]),
+			"Failed to create compute frame fence!");
+	}
 }
 
 bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
@@ -701,6 +854,12 @@ bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 
 	bool enableVSync = options.IsSet("vsync");
 	CreateSwapChain(hInstance, hwnd, width, height, enableVSync);
+	CreateSwapChainImageViews();
+
+	CreateRenderPass();
+	CreateGraphicsCommandBuffers();
+	CreateComputeCommandBuffers();
+	CreateSyncObjects();
 
 	return initResult;
 }

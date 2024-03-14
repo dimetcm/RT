@@ -24,11 +24,17 @@ private:
 		std::optional<uint32_t> preferedGPUIdx, bool listDevices);
 	HWND SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t height, bool fullscreen);
 	void CreateSwapChain(HINSTANCE hInstance, HWND hwnd, uint32_t width, uint32_t height, bool enableVSync);
+	void CreateSwapChainImageViews();
 
 	bool CreateVulkanInstance(bool enableValidation);
 	bool CreateVulkanLogicalDevice(bool enableValidationLayers);
-	VkCommandPool CreateCommandPool(uint32_t queueFamilyIndex,
-		VkCommandPoolCreateFlags createFlags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+	void CreateCommandPool();
+	void CreateRenderPass();
+    void CreateGraphicsCommandBuffers();
+    void CreateComputeCommandBuffers();
+	void CreateSyncObjects();
+
+	void CleanupSwapChain();
 private:
 	VkInstance m_vkInstance;
 	VkPhysicalDevice m_vkPhysicalDevice;
@@ -40,14 +46,34 @@ private:
 	VkPhysicalDeviceFeatures m_deviceFeatures{};
 	// Stores all available memory (type) properties for the physical device
 	VkPhysicalDeviceMemoryProperties m_deviceMemoryProperties{};
+
+	VkCommandPool m_commandPool;
 	// Surface
 	VkSurfaceKHR m_surface;
 	// Swap chain
 	VkSwapchainKHR m_swapChain;
 	
-	std::vector<VkImage> m_swapChainImages;
     VkFormat m_swapChainImageFormat;
     VkExtent2D m_swapChainExtent;
+
+	std::vector<VkImage> m_swapChainImages;
+	std::vector<VkImageView> m_swapChainImageViews;
+    std::vector<VkFramebuffer> m_swapChainFramebuffers;
+
+	VkQueue m_graphicsQueue;
+	VkQueue m_computeQueue;
+	VkQueue m_presentQueue;
+
+	VkRenderPass m_renderPass;
+
+	std::vector<VkCommandBuffer> m_graphicsCommandBuffers;
+    std::vector<VkCommandBuffer> m_computeCommandBuffers;
+
+	std::vector<VkSemaphore> m_imageAvailableSemaphores;
+    std::vector<VkSemaphore> m_renderFinishedSemaphores;
+    std::vector<VkSemaphore> m_computeFinishedSemaphores;
+    std::vector<VkFence> m_graphicsInFlightFences;
+    std::vector<VkFence> m_computeInFlightFences;
 
 	std::string m_appName;
 };
