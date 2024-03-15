@@ -1,6 +1,7 @@
 #include "VulkanUtils.h"
 
 #include <iostream>
+#include <fstream>
 
 namespace VulkanUtils
 {
@@ -92,6 +93,51 @@ std::string VkPhysicalDeviceTypeToString(VkPhysicalDeviceType type)
 #undef STR
     default: return "UNKNOWN_DEVICE_TYPE";
     }
+}
+
+VkPipelineShaderStageCreateInfo CreateShaderStage(VkDevice device, const std::string& fileName, VkShaderStageFlagBits stage)
+{
+    VkPipelineShaderStageCreateInfo shaderStage = {};
+	shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	shaderStage.stage = stage;
+    std::ifstream is(fileName.c_str(), std::ios::binary | std::ios::in | std::ios::ate);
+
+    if (is.is_open())
+    {
+        size_t size = is.tellg();
+        is.seekg(0, std::ios::beg);
+        char* shaderCode = new char[size];
+        is.read(shaderCode, size);
+        is.close();
+
+        assert(size > 0);
+
+        VkShaderModule shaderModule;
+        VkShaderModuleCreateInfo moduleCreateInfo{};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = size;
+        moduleCreateInfo.pCode = reinterpret_cast<uint32_t*>(shaderCode);
+
+        VK_CHECK_RESULT_MSG(vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule),
+            "Error: Could not create shader module \"" + fileName + "\"");
+
+        delete[] shaderCode;
+
+        shaderStage.module = shaderModule;
+    }
+    else
+    {
+        std::cerr << "Error: Could not open shader file \"" << fileName << "\"" << "\n";
+    }
+
+	shaderStage.pName = "main";
+	assert(shaderStage.module != VK_NULL_HANDLE);
+	return shaderStage;
+}
+
+void DestroyShaderStage(VkDevice device, VkPipelineShaderStageCreateInfo shaderStage)
+{
+    vkDestroyShaderModule(device, shaderStage.module, nullptr);
 }
 
 }

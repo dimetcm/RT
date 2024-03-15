@@ -12,6 +12,9 @@ namespace VulkanUtils
 
     std::string VkResultToString(VkResult result);
     std::string VkPhysicalDeviceTypeToString(VkPhysicalDeviceType type);
+
+	VkPipelineShaderStageCreateInfo CreateShaderStage(VkDevice device, const std::string& fileName, VkShaderStageFlagBits stage);
+	void DestroyShaderStage(VkDevice device, VkPipelineShaderStageCreateInfo shaderStage);
 }
 
 #define VK_CHECK_RESULT_MSG(f, errorDesciption)															\
@@ -30,4 +33,4 @@ namespace VulkanUtils
 #define VK_CHECK_RESULT(f)									\
 {															\
 	VK_CHECK_RESULT_MSG(f, "No error desciption provided")	\
-}															\
+}

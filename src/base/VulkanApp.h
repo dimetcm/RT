@@ -18,7 +18,9 @@ public:
 	virtual ~VulkanAppBase();
 
 	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
+
 	bool Init(HINSTANCE hInstance, const CommandLineOptions& options);
+
 private:
 	bool InitVulkan(HINSTANCE hInstance, HWND hwnd, bool enableValidation,
 		std::optional<uint32_t> preferedGPUIdx, bool listDevices);
@@ -33,6 +35,7 @@ private:
     void CreateGraphicsCommandBuffers();
     void CreateComputeCommandBuffers();
 	void CreateSyncObjects();
+	void CreateGraphicsPipeline();
 
 	void CleanupSwapChain();
 private:
@@ -74,6 +77,8 @@ private:
     std::vector<VkSemaphore> m_computeFinishedSemaphores;
     std::vector<VkFence> m_graphicsInFlightFences;
     std::vector<VkFence> m_computeInFlightFences;
+
+	VkPipeline m_graphicsPipeline;
 
 	std::string m_appName;
 };
