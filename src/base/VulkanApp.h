@@ -35,7 +35,9 @@ private:
     void CreateGraphicsCommandBuffers();
     void CreateComputeCommandBuffers();
 	void CreateSyncObjects();
+	void CreateDescriptorPool();
 	void CreateGraphicsPipeline();
+	void CreateComputePipeline();
 
 	void CleanupSwapChain();
 private:
@@ -78,7 +80,13 @@ private:
     std::vector<VkFence> m_graphicsInFlightFences;
     std::vector<VkFence> m_computeInFlightFences;
 
+	VkDescriptorPool m_descriptorPool;
+
+	VkDescriptorSet m_graphicsDescriptorSet;
+	VkDescriptorSet m_computeDescriptorSet;
+
 	VkPipeline m_graphicsPipeline;
+	VkPipeline m_computePipeline;
 
 	std::string m_appName;
 };
@@ -97,6 +105,7 @@ int StartApp(HINSTANCE hInstance, const CommandLineArgs& args)
 		app.RegisterCommandLineOptions(commandLineOptions);
 		commandLineOptions.Parse(args);
 		app.Init(hInstance, commandLineOptions);
+		app.Run();
 	}
 	system("pause");
 	return 0;

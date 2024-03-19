@@ -1,9 +1,12 @@
-// Copyright 2020 Google LLC
+#version 450
 
-Texture2D textureColor : register(t0);
-SamplerState samplerColor : register(s0);
+layout(binding = 0) uniform sampler2D textureColor;
 
-float4 main([[vk::location(0)]] float2 inUV : TEXCOORD0) : SV_TARGET
+layout(location = 0) in vec2 texCoord;
+
+layout(location = 0) out vec4 outColor;
+
+void main()
 {
-  return textureColor.Sample(samplerColor, float2(inUV.x, 1.0 - inUV.y));
+	outColor = texture(textureColor, texCoord);
 }

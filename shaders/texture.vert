@@ -1,15 +1,9 @@
-// Copyright 2020 Google LLC
+#version 450
 
-struct VSOutput
-{
-	float4 Pos : SV_POSITION;
-[[vk::location(0)]] float2 UV : TEXCOORD0;
-};
+layout(location = 0) out vec2 texCoord;
 
-VSOutput main(uint VertexIndex : SV_VertexID)
+void main()
 {
-	VSOutput output = (VSOutput)0;
-	output.UV = float2((VertexIndex << 1) & 2, VertexIndex & 2);
-	output.Pos = float4(output.UV * 2.0f + -1.0f, 0.0f, 1.0f);
-	return output;
+	texCoord = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+	gl_Position = vec4(texCoord * 2.0f + -1.0f, 0.0f, 1.0f);
 }

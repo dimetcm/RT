@@ -85,7 +85,11 @@ VulkanAppBase::~VulkanAppBase()
 {
 	CleanupSwapChain();
 
+	vkDestroyPipeline(m_vkDevice, m_computePipeline, nullptr);
+
 	vkDestroyPipeline(m_vkDevice, m_graphicsPipeline, nullptr);
+
+	vkDestroyDescriptorPool(m_vkDevice, m_descriptorPool, nullptr);
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
@@ -838,6 +842,27 @@ void VulkanAppBase::CreateSyncObjects()
 	}
 }
 
+void VulkanAppBase::CreateDescriptorPool()
+{	
+	std::vector<VkDescriptorPoolSize> poolSizes =
+	{
+		// vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),			// Compute UBO
+		// vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1),	// Graphics image samplers
+		// vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1),			// Storage image for ray traced image output
+		// vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1),			// Storage buffer for the scene primitives
+	};
+
+	VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+	descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	descriptorPoolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+	descriptorPoolInfo.pPoolSizes = poolSizes.data();
+	descriptorPoolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	VK_CHECK_RESULT_MSG(vkCreateDescriptorPool(m_vkDevice, &descriptorPoolInfo, nullptr, &m_descriptorPool),
+			"Failed to create descriptor pool!");
+
+}
+
 void VulkanAppBase::CreateGraphicsPipeline()
 {
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{};
@@ -957,6 +982,73 @@ void VulkanAppBase::CreateGraphicsPipeline()
 		VulkanUtils::DestroyShaderStage(m_vkDevice, shaderStage);
 	}
 
+	VkDescriptorSetAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = m_descriptorPool;
+	allocInfo.pSetLayouts = &descriptorSetLayout;
+	allocInfo.descriptorSetCount = 1;
+			
+	VK_CHECK_RESULT(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_graphicsDescriptorSet));
+		
+	vkDestroyDescriptorSetLayout(m_vkDevice, descriptorSetLayout, nullptr);
+	vkDestroyPipelineLayout(m_vkDevice, pipelineLayout, nullptr);
+}
+
+void VulkanAppBase::CreateComputePipeline()
+{
+	// Binding 0: Storage image (raytraced output)
+	VkDescriptorSetLayoutBinding storageImageBinding{};
+	storageImageBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	storageImageBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	storageImageBinding.binding = 0;
+	storageImageBinding.descriptorCount = 1;
+
+	// Binding 1: Uniform buffer block
+	VkDescriptorSetLayoutBinding uniformBufferBinding{};
+	uniformBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	uniformBufferBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	uniformBufferBinding.binding = 1;
+	uniformBufferBinding.descriptorCount = 1;
+
+	std::array<VkDescriptorSetLayoutBinding, 2> setLayoutBindings = {
+		storageImageBinding,
+		uniformBufferBinding
+	};
+
+	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
+	descriptorLayout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorLayout.pBindings = setLayoutBindings.data();
+	descriptorLayout.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+
+	VkDescriptorSetLayout descriptorSetLayout{};
+	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(m_vkDevice, &descriptorLayout, nullptr, &descriptorSetLayout));
+
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+	pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutCreateInfo.setLayoutCount = 1;
+	pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
+
+	VkPipelineLayout pipelineLayout{};
+	VK_CHECK_RESULT(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+	VkDescriptorSetAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = m_descriptorPool;
+	allocInfo.pSetLayouts = &descriptorSetLayout;
+	allocInfo.descriptorSetCount = 1;
+			
+	VK_CHECK_RESULT(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_computeDescriptorSet));
+
+	VkComputePipelineCreateInfo computePipelineCreateInfo{};
+	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo.layout = pipelineLayout;
+	computePipelineCreateInfo.flags = 0;
+	computePipelineCreateInfo.stage =
+		VulkanUtils::CreateShaderStage(m_vkDevice, GetShadersPath() + "raytracing.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+
+	VK_CHECK_RESULT(vkCreateComputePipelines(m_vkDevice, nullptr, 1, &computePipelineCreateInfo, nullptr, &m_computePipeline));
+
+	VulkanUtils::DestroyShaderStage(m_vkDevice, computePipelineCreateInfo.stage);
 	vkDestroyDescriptorSetLayout(m_vkDevice, descriptorSetLayout, nullptr);
 	vkDestroyPipelineLayout(m_vkDevice, pipelineLayout, nullptr);
 }
@@ -992,7 +1084,9 @@ bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateComputeCommandBuffers();
 	CreateSyncObjects();
 
+	CreateDescriptorPool();
 	CreateGraphicsPipeline();
+	CreateComputePipeline();
 
 	return initResult;
 }
