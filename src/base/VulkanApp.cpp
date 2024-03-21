@@ -369,8 +369,8 @@ bool VulkanAppBase::CreateVulkanLogicalDevice(bool enableValidationLayers)
 	return true;
 }
 
-bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
-	bool enableValidation, std::optional<uint32_t> preferedGPUIdx, bool listDevices)
+bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, bool enableValidation,
+	std::optional<uint32_t> preferedGPUIdx, bool listDevices)
 {
 	if (!CreateVulkanInstance(enableValidation))
 	{
@@ -388,7 +388,7 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
 	VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
 	surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
 	surfaceCreateInfo.hinstance = hInstance;
-	surfaceCreateInfo.hwnd = hwnd;
+	surfaceCreateInfo.hwnd = m_hwnd;
 	VK_CHECK_RESULT_MSG(vkCreateWin32SurfaceKHR(m_vkInstance, &surfaceCreateInfo, nullptr, &m_surface),
 		"Can't create surface");
 
@@ -488,6 +488,50 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, HWND hwnd,
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+	VulkanAppBase* app = reinterpret_cast<VulkanAppBase*>(GetWindowLongPtr(hWnd, 0));
+
+	switch (uMsg)
+	{
+	case WM_CLOSE:
+		DestroyWindow(hWnd);
+		PostQuitMessage(0);
+		break;
+	case WM_PAINT:
+		ValidateRect(hWnd, NULL);
+		break;
+	case WM_KEYDOWN:
+		switch (wParam)
+		{
+		case VK_ESCAPE:
+			PostQuitMessage(0);
+			break;
+		}
+	case WM_SIZE:
+		if (wParam != SIZE_MINIMIZED)
+		{
+			if (app->m_resizing || wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
+			{
+				uint32_t destWidth = LOWORD(lParam);
+				uint32_t destHeight = HIWORD(lParam);
+				//ResizeWindow(destWidth, destHeight);
+			}
+		}
+		break;
+	case WM_GETMINMAXINFO:
+	{
+		LPMINMAXINFO minMaxInfo = (LPMINMAXINFO)lParam;
+		minMaxInfo->ptMinTrackSize.x = 64;
+		minMaxInfo->ptMinTrackSize.y = 64;
+		break;
+	}
+	case WM_ENTERSIZEMOVE:
+		app->m_resizing = true;
+		break;
+	case WM_EXITSIZEMOVE:
+		app->m_resizing = false;
+		break;
+	}
+
 	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
 }
 
@@ -499,7 +543,7 @@ HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t he
 	wndClass.style = CS_HREDRAW | CS_VREDRAW;
 	wndClass.lpfnWndProc = WndProc;
 	wndClass.cbClsExtra = 0;
-	wndClass.cbWndExtra = 0;
+	wndClass.cbWndExtra = sizeof(this);
 	wndClass.hInstance = hInstance;
 	wndClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
 	wndClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
@@ -512,6 +556,7 @@ HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t he
 	{
 		VulkanUtils::FatalExit("Could not register window class!\n", 1);
 	}
+
 
 	int screenWidth = GetSystemMetrics(SM_CXSCREEN);
 	int screenHeight = GetSystemMetrics(SM_CYSCREEN);
@@ -578,6 +623,8 @@ HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t he
 		nullptr,
 		hInstance,
 		nullptr);
+
+	SetWindowLongPtr(window, 0, reinterpret_cast<LONG_PTR>(this));
 
 	if (!fullscreen)
 	{
@@ -658,7 +705,7 @@ static VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& surfaceCapabi
     }
 }
 
-void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, HWND hwnd, uint32_t width, uint32_t height, bool enableVSync)
+void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, uint32_t width, uint32_t height, bool enableVSync)
 {
     SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(m_vkPhysicalDevice, m_surface);
 
@@ -1053,7 +1100,33 @@ void VulkanAppBase::CreateComputePipeline()
 	vkDestroyPipelineLayout(m_vkDevice, pipelineLayout, nullptr);
 }
 
-bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
+void VulkanAppBase::Run()
+{
+	bool quitMessageReceived = false;
+	while (!quitMessageReceived) 
+	{
+		MSG msg;
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) 
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+			if (msg.message == WM_QUIT) 
+			{
+				quitMessageReceived = true;
+				break;
+			}
+		}
+		if (!IsIconic(m_hwnd))
+		{
+			Update();
+		}
+	}
+}
+
+void VulkanAppBase::Update()
+{}
+
+void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 {
 	Win32Helpers::SetupConsole(m_appName);
     SetupDPIAwareness();
@@ -1067,16 +1140,16 @@ bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	bool fullscreen = options.IsSet("fullscreen");
 	uint32_t width = options.GetValueAsInt("width", 800);
 	uint32_t height = options.GetValueAsInt("height", 600);
-	HWND hwnd = SetupWindow(hInstance, width, height, fullscreen);
+	m_hwnd = SetupWindow(hInstance, width, height, fullscreen);
 
-	bool initResult = InitVulkan(hInstance, hwnd, enableValidation, preferedGPUIdx, options.IsSet("gpulist"));
+	bool initResult = InitVulkan(hInstance, enableValidation, preferedGPUIdx, options.IsSet("gpulist"));
     if (!initResult)
 	{
-		std::cerr << "Failed to init vulkan\n";
+		VulkanUtils::FatalExit("Failed to init vulkan\n", -1);
 	}
 
 	bool enableVSync = options.IsSet("vsync");
-	CreateSwapChain(hInstance, hwnd, width, height, enableVSync);
+	CreateSwapChain(hInstance, width, height, enableVSync);
 	CreateSwapChainImageViews();
 
 	CreateRenderPass();
@@ -1087,6 +1160,4 @@ bool VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateDescriptorPool();
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
-
-	return initResult;
 }

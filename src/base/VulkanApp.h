@@ -19,13 +19,13 @@ public:
 
 	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
 
-	bool Init(HINSTANCE hInstance, const CommandLineOptions& options);
-
+	void Init(HINSTANCE hInstance, const CommandLineOptions& options);
+	void Run();
 private:
-	bool InitVulkan(HINSTANCE hInstance, HWND hwnd, bool enableValidation,
+	bool InitVulkan(HINSTANCE hInstance, bool enableValidation,
 		std::optional<uint32_t> preferedGPUIdx, bool listDevices);
 	HWND SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t height, bool fullscreen);
-	void CreateSwapChain(HINSTANCE hInstance, HWND hwnd, uint32_t width, uint32_t height, bool enableVSync);
+	void CreateSwapChain(HINSTANCE hInstance, uint32_t width, uint32_t height, bool enableVSync);
 	void CreateSwapChainImageViews();
 
 	bool CreateVulkanInstance(bool enableValidation);
@@ -40,7 +40,12 @@ private:
 	void CreateComputePipeline();
 
 	void CleanupSwapChain();
+
+	void Update();
 private:
+	HWND m_hwnd;
+	bool m_resizing = false;
+
 	VkInstance m_vkInstance;
 	VkPhysicalDevice m_vkPhysicalDevice;
 	// Vk logical device
@@ -89,6 +94,8 @@ private:
 	VkPipeline m_computePipeline;
 
 	std::string m_appName;
+
+	friend LRESULT WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
 
 template<class T>
