@@ -38,8 +38,11 @@ private:
 	void CreateDescriptorPool();
 	void CreateGraphicsPipeline();
 	void CreateComputePipeline();
+	void CreateFrameBuffers();
 
 	void CleanupSwapChain();
+
+	void RecordGraphicsCommandBuffer(uint32_t imageIndex);
 
 	void Update();
 private:
@@ -92,6 +95,8 @@ private:
 
 	VkPipeline m_graphicsPipeline;
 	VkPipeline m_computePipeline;
+
+	uint32_t m_currentFrame = 0;
 
 	std::string m_appName;
 

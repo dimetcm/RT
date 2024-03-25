@@ -889,6 +889,29 @@ void VulkanAppBase::CreateSyncObjects()
 	}
 }
 
+void VulkanAppBase::CreateFrameBuffers()
+{
+	m_swapChainFramebuffers.resize(m_swapChainImageViews.size());
+
+	for (size_t i = 0; i < m_swapChainImageViews.size(); i++) {
+		VkImageView attachments[] = {
+			m_swapChainImageViews[i]
+		};
+
+		VkFramebufferCreateInfo framebufferInfo{};
+		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferInfo.renderPass = m_renderPass;
+		framebufferInfo.attachmentCount = 1;
+		framebufferInfo.pAttachments = attachments;
+		framebufferInfo.width = m_swapChainExtent.width;
+		framebufferInfo.height = m_swapChainExtent.height;
+		framebufferInfo.layers = 1;
+
+		VK_CHECK_RESULT_MSG(vkCreateFramebuffer(m_vkDevice, &framebufferInfo, nullptr, &m_swapChainFramebuffers[i]),
+			"Failed to create framebuffer!");
+	}
+}
+
 void VulkanAppBase::CreateDescriptorPool()
 {	
 	std::vector<VkDescriptorPoolSize> poolSizes =
@@ -1121,10 +1144,101 @@ void VulkanAppBase::Run()
 			Update();
 		}
 	}
+
+	vkDeviceWaitIdle(m_vkDevice);
+}
+
+void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
+{
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	VK_CHECK_RESULT_MSG(vkBeginCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], &beginInfo),
+		"Failed to begin recording command buffer!");
+
+	VkRenderPassBeginInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	renderPassInfo.renderPass = m_renderPass;
+	renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
+	renderPassInfo.renderArea.offset = { 0, 0 };
+	renderPassInfo.renderArea.extent = m_swapChainExtent;
+
+	VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+	renderPassInfo.clearValueCount = 1;
+	renderPassInfo.pClearValues = &clearColor;
+
+	vkCmdBeginRenderPass(m_graphicsCommandBuffers[m_currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+	vkCmdBindPipeline(m_graphicsCommandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+
+	VkViewport viewport{};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float)m_swapChainExtent.width;
+	viewport.height = (float)m_swapChainExtent.height;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	vkCmdSetViewport(m_graphicsCommandBuffers[m_currentFrame], 0, 1, &viewport);
+
+	VkRect2D scissor{};
+	scissor.offset = { 0, 0 };
+	scissor.extent = m_swapChainExtent;
+	vkCmdSetScissor(m_graphicsCommandBuffers[m_currentFrame], 0, 1, &scissor);
+
+	vkCmdDraw(m_graphicsCommandBuffers[m_currentFrame], 3, 1, 0, 0);
+
+	vkCmdEndRenderPass(m_graphicsCommandBuffers[m_currentFrame]);
+
+	VK_CHECK_RESULT_MSG(vkEndCommandBuffer(m_graphicsCommandBuffers[m_currentFrame]),
+		"Failed to record command buffer!");
 }
 
 void VulkanAppBase::Update()
-{}
+{
+    vkWaitForFences(m_vkDevice, 1, &m_graphicsInFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+    vkResetFences(m_vkDevice, 1, &m_graphicsInFlightFences[m_currentFrame]);
+
+	uint32_t imageIndex;
+	vkAcquireNextImageKHR(m_vkDevice, m_swapChain, UINT64_MAX,
+		m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+    vkResetCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], 0);
+	RecordGraphicsCommandBuffer(imageIndex);
+
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[m_currentFrame] };
+	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitDstStageMask = waitStages;
+
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &m_graphicsCommandBuffers[m_currentFrame];
+
+	VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[m_currentFrame] };
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = signalSemaphores;
+
+	VK_CHECK_RESULT_MSG(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_graphicsInFlightFences[m_currentFrame]),
+		"Failed to submit draw command buffer!");
+
+	VkPresentInfoKHR presentInfo{};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = signalSemaphores;
+
+	VkSwapchainKHR swapChains[] = { m_swapChain };
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = swapChains;
+
+	presentInfo.pImageIndices = &imageIndex;
+
+	vkQueuePresentKHR(m_presentQueue, &presentInfo);
+	m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
 
 void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 {
@@ -1160,4 +1274,6 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateDescriptorPool();
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
+
+	CreateFrameBuffers();
 }
