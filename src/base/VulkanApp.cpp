@@ -77,6 +77,26 @@ static QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 	return indices;
 }
 
+uint32_t VulkanAppBase::GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const
+{
+	VkPhysicalDeviceMemoryProperties memoryProperties;
+	vkGetPhysicalDeviceMemoryProperties(m_vkPhysicalDevice, &memoryProperties);
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+	{
+		if ((typeBits & 1) == 1)
+		{
+			if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties)
+			{
+				return i;
+			}
+		}
+		typeBits >>= 1;
+	}
+
+	return -1;
+}
+
 VulkanAppBase::VulkanAppBase(const std::string& appName)
 	: m_appName(appName)
 {}
@@ -85,8 +105,15 @@ VulkanAppBase::~VulkanAppBase()
 {
 	CleanupSwapChain();
 
+	vkDestroyImageView(m_vkDevice, m_computeTargetTexture.descriptor.imageView, nullptr);
+	vkDestroySampler(m_vkDevice, m_computeTargetTexture.descriptor.sampler, nullptr);
+	vkDestroyImage(m_vkDevice, m_computeTargetTexture.image, nullptr);
+	vkFreeMemory(m_vkDevice, m_computeTargetTexture.memory, nullptr);
+
+	
 	vkDestroyPipeline(m_vkDevice, m_computePipeline, nullptr);
 
+	vkDestroyPipelineLayout(m_vkDevice, m_graphicsPipelineLayout, nullptr);
 	vkDestroyPipeline(m_vkDevice, m_graphicsPipeline, nullptr);
 
 	vkDestroyDescriptorPool(m_vkDevice, m_descriptorPool, nullptr);
@@ -933,6 +960,137 @@ void VulkanAppBase::CreateDescriptorPool()
 
 }
 
+void VulkanAppBase::CreateComputeShaderRenderTarget()
+{
+	const VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+	const uint32_t imageDim = 2048;
+	// Get device properties for the requested texture format
+	VkFormatProperties formatProperties;
+	vkGetPhysicalDeviceFormatProperties(m_vkPhysicalDevice, imageFormat, &formatProperties);
+	// Check if requested image format supports image storage operations
+	assert(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT);
+
+	VkImageCreateInfo imageCreateInfo{};
+	imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+	imageCreateInfo.format = imageFormat;
+	imageCreateInfo.extent = { imageDim, imageDim, 1 };
+	imageCreateInfo.mipLevels = 1;
+	imageCreateInfo.arrayLayers = 1;
+	imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	// Image will be sampled in the fragment shader and used as storage target in the compute shader
+	imageCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	imageCreateInfo.flags = 0;
+
+	VkImage image;
+	VK_CHECK_RESULT(vkCreateImage(m_vkDevice, &imageCreateInfo, nullptr, &image));
+
+	m_computeTargetTexture.image = image;
+
+	VkMemoryRequirements memReqs;
+	vkGetImageMemoryRequirements(m_vkDevice, image, &memReqs);
+	VkMemoryAllocateInfo memAllocInfo{};
+	memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	memAllocInfo.allocationSize = memReqs.size;
+	memAllocInfo.memoryTypeIndex = GetDeviceMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	VkDeviceMemory deviceMemory;
+	VK_CHECK_RESULT(vkAllocateMemory(m_vkDevice, &memAllocInfo, nullptr, &deviceMemory));
+	VK_CHECK_RESULT(vkBindImageMemory(m_vkDevice, image, deviceMemory, 0));
+
+	m_computeTargetTexture.memory = deviceMemory;
+
+	VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
+	commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	commandBufferAllocateInfo.commandPool = m_commandPool;
+	commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	commandBufferAllocateInfo.commandBufferCount = 1;
+
+	VkCommandBuffer commandBuffer{};
+	VK_CHECK_RESULT(vkAllocateCommandBuffers(m_vkDevice, &commandBufferAllocateInfo, &commandBuffer));
+		
+	VkCommandBufferBeginInfo commandBufferInfo{};
+	commandBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &commandBufferInfo));
+	
+	// set image loyout
+	VkImageSubresourceRange subresourceRange{};
+	subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	subresourceRange.baseMipLevel = 0;
+	subresourceRange.levelCount = 1;
+	subresourceRange.layerCount = 1;
+
+	// Create an image barrier object
+	VkImageMemoryBarrier imageMemoryBarrier{};
+	imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imageMemoryBarrier.image = image;
+	imageMemoryBarrier.subresourceRange = subresourceRange;
+
+	// Put barrier inside setup command buffer
+	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+
+	VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
+
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+	// Create fence to ensure that the command buffer has finished executing
+	VkFenceCreateInfo fenceCreateInfo{};
+	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	fenceCreateInfo.flags = 0;
+
+	VkFence fence;
+	VK_CHECK_RESULT(vkCreateFence(m_vkDevice, &fenceCreateInfo, nullptr, &fence));
+	// Submit to the queue
+	VK_CHECK_RESULT(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence));
+	// Wait for the fence to signal that command buffer has finished executing
+	VK_CHECK_RESULT(vkWaitForFences(m_vkDevice, 1, &fence, VK_TRUE, -1));
+	vkDestroyFence(m_vkDevice, fence, nullptr);
+	
+	vkFreeCommandBuffers(m_vkDevice, m_commandPool, 1, &commandBuffer);
+
+	// Create sampler
+	VkSamplerCreateInfo samplerCreateInfo{};
+	samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+	samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+	samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	samplerCreateInfo.mipLodBias = 0.0f;
+	samplerCreateInfo.maxAnisotropy = 1.0f;
+	samplerCreateInfo.compareOp = VK_COMPARE_OP_NEVER;
+	samplerCreateInfo.minLod = 0.0f;
+	samplerCreateInfo.maxLod = 0.0f;
+	samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	VkSampler sampler;
+	VK_CHECK_RESULT(vkCreateSampler(m_vkDevice, &samplerCreateInfo, nullptr, &sampler));
+
+	// Create image view
+	VkImageViewCreateInfo imageViewCreateInfo{};
+	imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	imageViewCreateInfo.format = imageFormat;
+	imageViewCreateInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	imageViewCreateInfo.image = image;
+
+	VkImageView imageView;
+	VK_CHECK_RESULT(vkCreateImageView(m_vkDevice, &imageViewCreateInfo, nullptr, &imageView));
+
+	m_computeTargetTexture.descriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	m_computeTargetTexture.descriptor.imageView = imageView;
+	m_computeTargetTexture.descriptor.sampler = sampler;
+}
+
 void VulkanAppBase::CreateGraphicsPipeline()
 {
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{};
@@ -1015,12 +1173,11 @@ void VulkanAppBase::CreateGraphicsPipeline()
 	pipelineLayoutCreateInfo.setLayoutCount = 1;
 	pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
 
-	VkPipelineLayout pipelineLayout{};
-	VK_CHECK_RESULT(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+	VK_CHECK_RESULT(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &m_graphicsPipelineLayout));
 
 	VkGraphicsPipelineCreateInfo pipelineCreateInfo{};
 	pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	pipelineCreateInfo.layout = pipelineLayout;
+	pipelineCreateInfo.layout = m_graphicsPipelineLayout;
 	pipelineCreateInfo.renderPass = m_renderPass;
 	pipelineCreateInfo.flags = 0;
 	pipelineCreateInfo.basePipelineIndex = -1;
@@ -1059,9 +1216,24 @@ void VulkanAppBase::CreateGraphicsPipeline()
 	allocInfo.descriptorSetCount = 1;
 			
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_graphicsDescriptorSet));
+
+	// Binding 0 : Fragment shader texture sampler
+	VkWriteDescriptorSet fragmentShaderTextureSampler{};
+	fragmentShaderTextureSampler.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	fragmentShaderTextureSampler.dstSet = m_graphicsDescriptorSet;
+	fragmentShaderTextureSampler.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	fragmentShaderTextureSampler.dstBinding = 0;
+	fragmentShaderTextureSampler.pImageInfo = &m_computeTargetTexture.descriptor;
+	fragmentShaderTextureSampler.descriptorCount = 1;
+
+	std::vector<VkWriteDescriptorSet> writeDescriptorSets =
+	{
+		fragmentShaderTextureSampler
+	};
+
+	vkUpdateDescriptorSets(m_vkDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		
 	vkDestroyDescriptorSetLayout(m_vkDevice, descriptorSetLayout, nullptr);
-	vkDestroyPipelineLayout(m_vkDevice, pipelineLayout, nullptr);
 }
 
 void VulkanAppBase::CreateComputePipeline()
@@ -1169,6 +1341,8 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 
 	vkCmdBeginRenderPass(m_graphicsCommandBuffers[m_currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
+	vkCmdBindDescriptorSets(m_graphicsCommandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
+		m_graphicsPipelineLayout, 0, 1, &m_graphicsDescriptorSet, 0, nullptr);
 	vkCmdBindPipeline(m_graphicsCommandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
 	VkViewport viewport{};
@@ -1272,8 +1446,8 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateSyncObjects();
 
 	CreateDescriptorPool();
+	CreateComputeShaderRenderTarget();
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
-
 	CreateFrameBuffers();
 }

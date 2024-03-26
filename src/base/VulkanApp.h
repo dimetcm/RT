@@ -39,12 +39,15 @@ private:
 	void CreateGraphicsPipeline();
 	void CreateComputePipeline();
 	void CreateFrameBuffers();
+	void CreateComputeShaderRenderTarget();
 
 	void CleanupSwapChain();
 
 	void RecordGraphicsCommandBuffer(uint32_t imageIndex);
 
 	void Update();
+
+	uint32_t GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
 private:
 	HWND m_hwnd;
 	bool m_resizing = false;
@@ -93,7 +96,15 @@ private:
 	VkDescriptorSet m_graphicsDescriptorSet;
 	VkDescriptorSet m_computeDescriptorSet;
 
+	struct
+	{
+		VkImage image;
+		VkDescriptorImageInfo descriptor;
+		VkDeviceMemory memory;			
+	} m_computeTargetTexture;
+
 	VkPipeline m_graphicsPipeline;
+	VkPipelineLayout m_graphicsPipelineLayout;
 	VkPipeline m_computePipeline;
 
 	uint32_t m_currentFrame = 0;
