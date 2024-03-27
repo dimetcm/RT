@@ -43,6 +43,7 @@ private:
 
 	void CleanupSwapChain();
 
+	void RecordComputeCommandBuffer();
 	void RecordGraphicsCommandBuffer(uint32_t imageIndex);
 
 	void Update();
@@ -100,12 +101,15 @@ private:
 	{
 		VkImage image;
 		VkDescriptorImageInfo descriptor;
-		VkDeviceMemory memory;			
+		VkDeviceMemory memory;
+		uint32_t width;
+		uint32_t height;			
 	} m_computeTargetTexture;
 
 	VkPipeline m_graphicsPipeline;
 	VkPipelineLayout m_graphicsPipelineLayout;
 	VkPipeline m_computePipeline;
+	VkPipelineLayout m_computePipelineLayout;
 
 	uint32_t m_currentFrame = 0;
 

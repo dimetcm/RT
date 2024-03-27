@@ -110,7 +110,7 @@ VulkanAppBase::~VulkanAppBase()
 	vkDestroyImage(m_vkDevice, m_computeTargetTexture.image, nullptr);
 	vkFreeMemory(m_vkDevice, m_computeTargetTexture.memory, nullptr);
 
-	
+	vkDestroyPipelineLayout(m_vkDevice, m_computePipelineLayout, nullptr);
 	vkDestroyPipeline(m_vkDevice, m_computePipeline, nullptr);
 
 	vkDestroyPipelineLayout(m_vkDevice, m_graphicsPipelineLayout, nullptr);
@@ -964,6 +964,9 @@ void VulkanAppBase::CreateComputeShaderRenderTarget()
 {
 	const VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
 	const uint32_t imageDim = 2048;
+
+	m_computeTargetTexture.width = imageDim;
+	m_computeTargetTexture.height = imageDim;
 	// Get device properties for the requested texture format
 	VkFormatProperties formatProperties;
 	vkGetPhysicalDeviceFormatProperties(m_vkPhysicalDevice, imageFormat, &formatProperties);
@@ -1245,16 +1248,8 @@ void VulkanAppBase::CreateComputePipeline()
 	storageImageBinding.binding = 0;
 	storageImageBinding.descriptorCount = 1;
 
-	// Binding 1: Uniform buffer block
-	VkDescriptorSetLayoutBinding uniformBufferBinding{};
-	uniformBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	uniformBufferBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	uniformBufferBinding.binding = 1;
-	uniformBufferBinding.descriptorCount = 1;
-
-	std::array<VkDescriptorSetLayoutBinding, 2> setLayoutBindings = {
+	std::array<VkDescriptorSetLayoutBinding, 1> setLayoutBindings = {
 		storageImageBinding,
-		uniformBufferBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
@@ -1270,8 +1265,18 @@ void VulkanAppBase::CreateComputePipeline()
 	pipelineLayoutCreateInfo.setLayoutCount = 1;
 	pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
 
-	VkPipelineLayout pipelineLayout{};
-	VK_CHECK_RESULT(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+	VK_CHECK_RESULT(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &m_computePipelineLayout));
+
+	VkComputePipelineCreateInfo computePipelineCreateInfo{};
+	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo.layout = m_computePipelineLayout;
+	computePipelineCreateInfo.flags = 0;
+	computePipelineCreateInfo.stage =
+		VulkanUtils::CreateShaderStage(m_vkDevice, GetShadersPath() + "raytracing.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+
+	VK_CHECK_RESULT(vkCreateComputePipelines(m_vkDevice, nullptr, 1, &computePipelineCreateInfo, nullptr, &m_computePipeline));
+
+	VulkanUtils::DestroyShaderStage(m_vkDevice, computePipelineCreateInfo.stage);
 
 	VkDescriptorSetAllocateInfo allocInfo{};
 	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1281,18 +1286,23 @@ void VulkanAppBase::CreateComputePipeline()
 			
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_computeDescriptorSet));
 
-	VkComputePipelineCreateInfo computePipelineCreateInfo{};
-	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	computePipelineCreateInfo.layout = pipelineLayout;
-	computePipelineCreateInfo.flags = 0;
-	computePipelineCreateInfo.stage =
-		VulkanUtils::CreateShaderStage(m_vkDevice, GetShadersPath() + "raytracing.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+	VkWriteDescriptorSet outputStorageImage{};
+	outputStorageImage.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	outputStorageImage.dstSet = m_computeDescriptorSet;
+	outputStorageImage.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	outputStorageImage.dstBinding = 0;
+	outputStorageImage.pImageInfo = &m_computeTargetTexture.descriptor;
+	outputStorageImage.descriptorCount = 1;
 
-	VK_CHECK_RESULT(vkCreateComputePipelines(m_vkDevice, nullptr, 1, &computePipelineCreateInfo, nullptr, &m_computePipeline));
+	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets =
+	{
+		outputStorageImage
+	};
 
-	VulkanUtils::DestroyShaderStage(m_vkDevice, computePipelineCreateInfo.stage);
+	vkUpdateDescriptorSets(m_vkDevice,
+		static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
+
 	vkDestroyDescriptorSetLayout(m_vkDevice, descriptorSetLayout, nullptr);
-	vkDestroyPipelineLayout(m_vkDevice, pipelineLayout, nullptr);
 }
 
 void VulkanAppBase::Run()
@@ -1318,6 +1328,30 @@ void VulkanAppBase::Run()
 	}
 
 	vkDeviceWaitIdle(m_vkDevice);
+}
+
+void VulkanAppBase::RecordComputeCommandBuffer()
+{
+	VkCommandBufferBeginInfo cmdBufInfo{};
+	cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	
+	VK_CHECK_RESULT(vkBeginCommandBuffer(m_computeCommandBuffers[m_currentFrame], &cmdBufInfo));
+		
+	VkImageMemoryBarrier imageMemoryBarrier = {};
+	imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imageMemoryBarrier.image = m_computeTargetTexture.image;
+	imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+	vkCmdBindPipeline(m_computeCommandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipeline);
+	vkCmdBindDescriptorSets(m_computeCommandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_COMPUTE,
+		m_computePipelineLayout, 0, 1, &m_computeDescriptorSet, 0, 0);
+
+	vkCmdDispatch(m_computeCommandBuffers[m_currentFrame],
+		m_computeTargetTexture.width / 16, m_computeTargetTexture.height / 16, 1);
+
+	vkEndCommandBuffer(m_computeCommandBuffers[m_currentFrame]);	
 }
 
 void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
@@ -1369,22 +1403,40 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 
 void VulkanAppBase::Update()
 {
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	// Compute submission        
+	vkWaitForFences(m_vkDevice, 1, &m_computeInFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+
+	vkResetFences(m_vkDevice, 1, &m_computeInFlightFences[m_currentFrame]);
+
+	vkResetCommandBuffer(m_computeCommandBuffers[m_currentFrame], 0);
+	
+	RecordComputeCommandBuffer();
+
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &m_computeCommandBuffers[m_currentFrame];
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &m_computeFinishedSemaphores[m_currentFrame];
+
+	VK_CHECK_RESULT_MSG(vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_computeInFlightFences[m_currentFrame]),
+		"Failed to submit compute command buffer!");
+
+	// Graphics submission
     vkWaitForFences(m_vkDevice, 1, &m_graphicsInFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
     vkResetFences(m_vkDevice, 1, &m_graphicsInFlightFences[m_currentFrame]);
-
+	vkResetCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], 0);
+	
 	uint32_t imageIndex;
 	vkAcquireNextImageKHR(m_vkDevice, m_swapChain, UINT64_MAX,
 		m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-    vkResetCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], 0);
-	RecordGraphicsCommandBuffer(imageIndex);
+    RecordGraphicsCommandBuffer(imageIndex);
 
-	VkSubmitInfo submitInfo{};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-	VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[m_currentFrame] };
-	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-	submitInfo.waitSemaphoreCount = 1;
+	VkSemaphore waitSemaphores[] = { m_computeFinishedSemaphores[m_currentFrame], m_imageAvailableSemaphores[m_currentFrame] };
+	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	submitInfo.waitSemaphoreCount = 2;
 	submitInfo.pWaitSemaphores = waitSemaphores;
 	submitInfo.pWaitDstStageMask = waitStages;
 
