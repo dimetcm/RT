@@ -6,6 +6,7 @@ set(NAME RT)
 project(${NAME})
 
 include_directories(src/base)
+include_directories(external/glm)
 
 # Use FindVulkan module added with CMAKE 3.7
 if (NOT CMAKE_VERSION VERSION_LESS 3.7.0)
