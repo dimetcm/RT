@@ -7,9 +7,41 @@ layout (binding = 1) uniform UBO
 	float aspectRatio;
 } ubo;
 
+vec3 ray_at(vec3 origin, vec3 direction, float t)
+{
+    return origin + direction * t;
+}
+
+float hit_sphere(vec3 center, float radius, vec3 origin, vec3 direction)
+{
+    vec3 oc = origin - center;
+    float a = dot(direction, direction);
+    float b = 2.0 * dot(oc, direction);
+    float c = dot(oc, oc) - radius*radius;
+    float discriminant = b*b - 4*a*c;
+
+    if (discriminant < 0.0)
+    {
+        return -1.0;
+    }
+    else
+    {
+        return (-b - sqrt(discriminant) ) / (2.0*a);
+    }
+}
+
 vec3 ray_color(vec3 origin, vec3 direction)
 {
-    float a = 0.5*(direction.y + 1.0);
+    float t = hit_sphere(vec3(0.0, 0.0, -1.0), 0.5, origin, direction);
+    if (t > 0)
+    {
+        vec3 N = normalize(ray_at(origin, direction, t) - vec3(0,0,-1));
+        return 0.5 * vec3(N.x + 1.0, N.y + 1.0, N.z + 1.0);
+    }
+
+    vec3 unit_direction = normalize(direction);
+
+    float a = 0.5*(unit_direction.y + 1.0);
     return (1.0-a)*vec3(1.0, 1.0, 1.0) + a*vec3(0.5, 0.7, 1.0);
 } 
 
@@ -17,12 +49,31 @@ layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 void main()
 {
     ivec2 dim = imageSize(resultImage);
-    vec2 uv = vec2(gl_GlobalInvocationID.xy) / dim;
 
-    vec3 rayO = vec3(0.0, 0.0, 0.0);
-	vec3 rayD = normalize(vec3((-1.0 + 2.0 * uv) * vec2(ubo.aspectRatio, -1.0), -1.0));
+    // Camera
 
-    vec4 finalColor = vec4(ray_color(rayO, rayD), 0);
+    float focal_length = 1.0;
+    float viewport_height = 2.0;
+    float viewport_width = viewport_height * ubo.aspectRatio;
+    vec3 camera_center = vec3(0.0, 0.0, 0.0);
+
+    // Calculate the vectors across the horizontal and down the vertical viewport edges.
+    vec3 viewport_u = vec3(viewport_width, 0, 0);
+    vec3 viewport_v = vec3(0, -viewport_height, 0);
+
+    // Calculate the horizontal and vertical delta vectors from pixel to pixel.
+    vec3 pixel_delta_u = viewport_u / dim.x;
+    vec3 pixel_delta_v = viewport_v / dim.y;
+
+    // Calculate the location of the upper left pixel.
+    vec3 viewport_upper_left = camera_center
+                             - vec3(0, 0, focal_length) - viewport_u/2 - viewport_v/2;
+    vec3 pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
+
+    vec3 pixel_center = pixel00_loc + (gl_GlobalInvocationID.x * pixel_delta_u) + (gl_GlobalInvocationID.y * pixel_delta_v);
+    vec3 ray_direction = pixel_center - camera_center;
+
+    vec4 finalColor = vec4(ray_color(camera_center, ray_direction), 0);
 
 	imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), finalColor);
 }
