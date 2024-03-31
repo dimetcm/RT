@@ -105,6 +105,7 @@ VulkanAppBase::~VulkanAppBase()
 {
 	CleanupSwapChain();
 
+
 	vkDestroyImageView(m_vkDevice, m_computeTargetTexture.descriptor.imageView, nullptr);
 	vkDestroySampler(m_vkDevice, m_computeTargetTexture.descriptor.sampler, nullptr);
 	vkDestroyImage(m_vkDevice, m_computeTargetTexture.image, nullptr);
@@ -125,6 +126,9 @@ VulkanAppBase::~VulkanAppBase()
 		vkDestroySemaphore(m_vkDevice, m_computeFinishedSemaphores[i], nullptr);
 		vkDestroyFence(m_vkDevice, m_graphicsInFlightFences[i], nullptr);
 		vkDestroyFence(m_vkDevice, m_computeInFlightFences[i], nullptr);
+
+		vkDestroyBuffer(m_vkDevice, m_computeUBO.vkBuffers[i], nullptr);
+		vkFreeMemory(m_vkDevice, m_computeUBO.vkBuffersMemory[i], nullptr);
 	}
 
 	vkDestroyRenderPass(m_vkDevice, m_renderPass, nullptr);
@@ -1094,6 +1098,38 @@ void VulkanAppBase::CreateComputeShaderRenderTarget()
 	m_computeTargetTexture.descriptor.sampler = sampler;
 }
 
+void VulkanAppBase::CreateComputeShaderUBO()
+{
+	m_computeUBO.vkBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+	m_computeUBO.vkBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+	{
+		VkBufferCreateInfo bufferCreateInfo{};
+		bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		bufferCreateInfo.size = sizeof(m_computeUBO.ubo);
+
+		VK_CHECK_RESULT(vkCreateBuffer(m_vkDevice, &bufferCreateInfo, nullptr, &m_computeUBO.vkBuffers[i]));
+
+		// Create the memory backing up the buffer handle
+		VkMemoryRequirements memReqs;
+		vkGetBufferMemoryRequirements(m_vkDevice, m_computeUBO.vkBuffers[i], &memReqs);
+
+		VkMemoryAllocateInfo memAllocInfo{};
+		memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		memAllocInfo.allocationSize = memReqs.size;
+		// Find a memory type index that fits the properties of the buffer
+		memAllocInfo.memoryTypeIndex = GetDeviceMemoryType(memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+		VK_CHECK_RESULT(vkAllocateMemory(m_vkDevice, &memAllocInfo, nullptr, &m_computeUBO.vkBuffersMemory[i]));
+
+		// Attach the memory to the buffer object
+		VK_CHECK_RESULT(vkBindBufferMemory(m_vkDevice, m_computeUBO.vkBuffers[i], m_computeUBO.vkBuffersMemory[i], 0));
+	}
+}
+
 void VulkanAppBase::CreateGraphicsPipeline()
 {
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{};
@@ -1248,8 +1284,16 @@ void VulkanAppBase::CreateComputePipeline()
 	storageImageBinding.binding = 0;
 	storageImageBinding.descriptorCount = 1;
 
-	std::array<VkDescriptorSetLayoutBinding, 1> setLayoutBindings = {
+	// Binding 1: Uniform buffer block
+	VkDescriptorSetLayoutBinding uboBinding{};
+	uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	uboBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	uboBinding.binding = 1;
+	uboBinding.descriptorCount = 1;
+
+	std::array<VkDescriptorSetLayoutBinding, 2> setLayoutBindings = {
 		storageImageBinding,
+		uboBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
@@ -1286,6 +1330,8 @@ void VulkanAppBase::CreateComputePipeline()
 			
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_computeDescriptorSet));
 
+	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets;
+
 	VkWriteDescriptorSet outputStorageImage{};
 	outputStorageImage.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	outputStorageImage.dstSet = m_computeDescriptorSet;
@@ -1294,10 +1340,26 @@ void VulkanAppBase::CreateComputePipeline()
 	outputStorageImage.pImageInfo = &m_computeTargetTexture.descriptor;
 	outputStorageImage.descriptorCount = 1;
 
-	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets =
+	computeWriteDescriptorSets.push_back(outputStorageImage);
+
+	std::vector<VkDescriptorBufferInfo> uniformBufferInfos(MAX_FRAMES_IN_FLIGHT);
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 	{
-		outputStorageImage
-	};
+    	uniformBufferInfos[i].buffer = m_computeUBO.vkBuffers[i];
+    	uniformBufferInfos[i].offset = 0;
+    	uniformBufferInfos[i].range = sizeof(ComputeUBO::UniformBuffer);
+
+		VkWriteDescriptorSet ubo{};
+		ubo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ubo.dstSet = m_computeDescriptorSet;
+		ubo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		ubo.dstBinding = 1;
+		ubo.pBufferInfo = &uniformBufferInfos[i];
+		ubo.descriptorCount = 1;
+
+		computeWriteDescriptorSets.push_back(ubo);
+	}
 
 	vkUpdateDescriptorSets(m_vkDevice,
 		static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
@@ -1403,8 +1465,10 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 
 void VulkanAppBase::Update()
 {
-	VkSubmitInfo submitInfo{};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	void* uboMapped = nullptr;
+	VK_CHECK_RESULT(vkMapMemory(m_vkDevice, m_computeUBO.vkBuffersMemory[m_currentFrame], 0, VK_WHOLE_SIZE, 0, &uboMapped));
+	memcpy(uboMapped, &m_computeUBO.ubo, sizeof(ComputeUBO::UniformBuffer));
+	vkUnmapMemory(m_vkDevice, m_computeUBO.vkBuffersMemory[m_currentFrame]);
 
 	// Compute submission        
 	vkWaitForFences(m_vkDevice, 1, &m_computeInFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
@@ -1415,6 +1479,8 @@ void VulkanAppBase::Update()
 	
 	RecordComputeCommandBuffer();
 
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &m_computeCommandBuffers[m_currentFrame];
 	submitInfo.signalSemaphoreCount = 1;
@@ -1480,6 +1546,9 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	bool fullscreen = options.IsSet("fullscreen");
 	uint32_t width = options.GetValueAsInt("width", 800);
 	uint32_t height = options.GetValueAsInt("height", 600);
+
+	m_computeUBO.ubo.aspectRatio = (float)width / (float)height;
+
 	m_hwnd = SetupWindow(hInstance, width, height, fullscreen);
 
 	bool initResult = InitVulkan(hInstance, enableValidation, preferedGPUIdx, options.IsSet("gpulist"));
@@ -1498,6 +1567,7 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateSyncObjects();
 
 	CreateDescriptorPool();
+	CreateComputeShaderUBO();
 	CreateComputeShaderRenderTarget();
 	CreateGraphicsPipeline();
 	CreateComputePipeline();

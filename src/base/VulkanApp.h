@@ -5,6 +5,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <glm/glm.hpp>
+
 #pragma comment(linker, "/subsystem:windows")
 #include <windows.h>
 #include <crtdbg.h>
@@ -40,6 +42,7 @@ private:
 	void CreateComputePipeline();
 	void CreateFrameBuffers();
 	void CreateComputeShaderRenderTarget();
+	void CreateComputeShaderUBO();
 
 	void CleanupSwapChain();
 
@@ -110,6 +113,17 @@ private:
 	VkPipelineLayout m_graphicsPipelineLayout;
 	VkPipeline m_computePipeline;
 	VkPipelineLayout m_computePipelineLayout;
+
+	struct ComputeUBO
+	{
+		std::vector<VkBuffer> vkBuffers;
+		std::vector<VkDeviceMemory> vkBuffersMemory;
+		std::vector<void*> mappedBuffers;
+		struct UniformBuffer
+		{
+			float aspectRatio = 1.0f;
+		} ubo;
+	} m_computeUBO;
 
 	uint32_t m_currentFrame = 0;
 
