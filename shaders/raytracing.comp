@@ -10,6 +10,38 @@ layout (binding = 1) uniform UBO
 
 float infinity = 1.0 / 0.0;
 
+struct interval
+{
+    float min;
+    float max;
+};
+
+interval make_empty_interval()
+{
+    interval i;
+    i.min = infinity;
+    i.max = -infinity;
+    return i;
+}
+
+interval make_universe_interval()
+{
+    interval i;
+    i.min = -infinity;
+    i.max = infinity;
+    return i;
+}
+
+bool interval_contains(interval i, float v)
+{
+    return i.min <= v && v <= i.max;
+}
+
+bool interval_surrounds(interval i, float v)
+{
+    return i.min < v && v < i.max;
+}
+
 struct ray
 {
     vec3 origin;
@@ -37,7 +69,7 @@ struct sphere
 
 sphere spheres[2];
 
-raycast_result raycast_sphere(ray r, float ray_tmin, float ray_tmax, sphere s)
+raycast_result raycast_sphere(ray r, interval i, sphere s)
 {
     raycast_result result;
     vec3 oc = r.origin - s.center;
@@ -48,7 +80,7 @@ raycast_result raycast_sphere(ray r, float ray_tmin, float ray_tmax, sphere s)
 
     if (discriminant < 0.0)
     {
-        result.t = ray_tmax;
+        result.t = i.max;
         return result;
     }
     else
@@ -57,12 +89,12 @@ raycast_result raycast_sphere(ray r, float ray_tmin, float ray_tmax, sphere s)
 
         // Find the nearest root that lies in the acceptable range.
         float root = (-half_b - sqrtd) / a;
-        if (root <= ray_tmin || ray_tmax <= root) 
+        if (!interval_surrounds(i, root)) 
         {
             root = (-half_b + sqrtd) / a;
-            if (root <= ray_tmin || ray_tmax <= root)
+            if (!interval_surrounds(i, root))
             {
-                result.t = ray_tmax;
+                result.t = i.max;
                 return result;
             }
         }
@@ -85,7 +117,7 @@ vec3 ray_color(ray r)
     float ray_tmax = infinity;
     for (int i = 0; i < spheres.length(); ++i)
     {
-        result = raycast_sphere(r, 0, ray_tmax, spheres[i]);
+        result = raycast_sphere(r, interval(0, ray_tmax), spheres[i]);
         if (result.t < ray_tmax)
         {
             ray_tmax = result.t;
