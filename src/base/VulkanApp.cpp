@@ -39,7 +39,7 @@ struct QueueFamilyIndices
 
 struct SwapChainSupportDetails
 {
-    VkSurfaceCapabilitiesKHR capabilities;
+    VkSurfaceCapabilitiesKHR capabilities{};
     std::vector<VkSurfaceFormatKHR> formats;
     std::vector<VkPresentModeKHR> presentModes;
 };
@@ -103,8 +103,7 @@ VulkanAppBase::VulkanAppBase(const std::string& appName)
 
 VulkanAppBase::~VulkanAppBase()
 {
-	CleanupSwapChain();
-
+	CleanupSwapChain(m_swapChain);
 
 	vkDestroyImageView(m_vkDevice, m_computeTargetTexture.descriptor.imageView, nullptr);
 	vkDestroySampler(m_vkDevice, m_computeTargetTexture.descriptor.sampler, nullptr);
@@ -142,7 +141,7 @@ VulkanAppBase::~VulkanAppBase()
 	vkDestroyInstance(m_vkInstance, nullptr);
 }
 
-void VulkanAppBase::CleanupSwapChain()
+void VulkanAppBase::CleanupSwapChain(VkSwapchainKHR swapChain)
 {
 	for (VkFramebuffer framebuffer : m_swapChainFramebuffers) 
 	{
@@ -154,7 +153,24 @@ void VulkanAppBase::CleanupSwapChain()
 		vkDestroyImageView(m_vkDevice, imageView, nullptr);
 	}
 
-	vkDestroySwapchainKHR(m_vkDevice, m_swapChain, nullptr);
+	vkDestroySwapchainKHR(m_vkDevice, swapChain, nullptr);
+}
+
+void VulkanAppBase::ResizeWindow(uint32_t width, uint32_t height)
+{
+	// Ensure all operations on the device have been finished before destroying resources
+	vkDeviceWaitIdle(m_vkDevice);
+
+	if (CreateSwapChain(width, height))
+	{
+		CreateSwapChainImageViews();
+		CreateFrameBuffers();
+
+		if (width > 0.0f && height > 0.0f)
+		{
+			m_computeUBO.ubo.aspectRatio = (float)width / (float)height; 
+		}
+	}
 }
 
 void VulkanAppBase::RegisterCommandLineOptions(CommandLineOptions& options) const
@@ -400,7 +416,7 @@ bool VulkanAppBase::CreateVulkanLogicalDevice(bool enableValidationLayers)
 	return true;
 }
 
-bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, bool enableValidation,
+bool VulkanAppBase::InitVulkan(bool enableValidation,
 	std::optional<uint32_t> preferedGPUIdx, bool listDevices)
 {
 	if (!CreateVulkanInstance(enableValidation))
@@ -418,7 +434,7 @@ bool VulkanAppBase::InitVulkan(HINSTANCE hInstance, bool enableValidation,
 	// create surface
 	VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
 	surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-	surfaceCreateInfo.hinstance = hInstance;
+	surfaceCreateInfo.hinstance = m_hInstance;
 	surfaceCreateInfo.hwnd = m_hwnd;
 	VK_CHECK_RESULT_MSG(vkCreateWin32SurfaceKHR(m_vkInstance, &surfaceCreateInfo, nullptr, &m_surface),
 		"Can't create surface");
@@ -538,13 +554,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			break;
 		}
 	case WM_SIZE:
-		if (wParam != SIZE_MINIMIZED)
+		if (app->m_initialized && wParam != SIZE_MINIMIZED)
 		{
 			if (app->m_resizing || wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
 			{
 				uint32_t destWidth = LOWORD(lParam);
 				uint32_t destHeight = HIWORD(lParam);
-				//ResizeWindow(destWidth, destHeight);
+				app->ResizeWindow(destWidth, destHeight);
 			}
 		}
 		break;
@@ -566,7 +582,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
 }
 
-HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t height, bool fullscreen)
+HWND VulkanAppBase::SetupWindow(uint32_t width, uint32_t height, bool fullscreen)
 {
 	WNDCLASSEX wndClass;
 
@@ -575,7 +591,7 @@ HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t he
 	wndClass.lpfnWndProc = WndProc;
 	wndClass.cbClsExtra = 0;
 	wndClass.cbWndExtra = sizeof(this);
-	wndClass.hInstance = hInstance;
+	wndClass.hInstance = m_hInstance;
 	wndClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
 	wndClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
 	wndClass.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
@@ -652,7 +668,7 @@ HWND VulkanAppBase::SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t he
 		windowRect.bottom - windowRect.top,
 		nullptr,
 		nullptr,
-		hInstance,
+		m_hInstance,
 		nullptr);
 
 	SetWindowLongPtr(window, 0, reinterpret_cast<LONG_PTR>(this));
@@ -736,13 +752,20 @@ static VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& surfaceCapabi
     }
 }
 
-void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, uint32_t width, uint32_t height, bool enableVSync)
+bool VulkanAppBase::CreateSwapChain(uint32_t width, uint32_t height)
 {
+	VkSwapchainKHR oldSwapchain = m_swapChain;
+
     SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(m_vkPhysicalDevice, m_surface);
 
 	VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
-    VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes, enableVSync);
+    VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes, m_vsyncEnabled);
     VkExtent2D extent = ChooseSwapExtent(swapChainSupport.capabilities, {.width = width, .height = height});
+
+	if (extent.height == 0 && extent.width == 0)
+	{
+		return false;
+	}
 
     uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
     if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
@@ -778,9 +801,12 @@ void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, uint32_t width, uint32_
 	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	createInfo.presentMode = presentMode;
 	createInfo.clipped = VK_TRUE;
+	createInfo.oldSwapchain = oldSwapchain;
 
 	VK_CHECK_RESULT_MSG(vkCreateSwapchainKHR(m_vkDevice, &createInfo, nullptr, &m_swapChain),
 		"Failed to create swap chain!");
+
+	CleanupSwapChain(oldSwapchain);
 
 	vkGetSwapchainImagesKHR(m_vkDevice, m_swapChain, &imageCount, nullptr);
 	m_swapChainImages.resize(imageCount);
@@ -788,6 +814,8 @@ void VulkanAppBase::CreateSwapChain(HINSTANCE hInstance, uint32_t width, uint32_
 
 	m_swapChainImageFormat = surfaceFormat.format;
 	m_swapChainExtent = extent;
+
+	return true;
 }
 
 void VulkanAppBase::CreateSwapChainImageViews()
@@ -1495,8 +1523,16 @@ void VulkanAppBase::Update()
 	vkResetCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], 0);
 	
 	uint32_t imageIndex;
-	vkAcquireNextImageKHR(m_vkDevice, m_swapChain, UINT64_MAX,
+	VkResult result = vkAcquireNextImageKHR(m_vkDevice, m_swapChain, UINT64_MAX,
 		m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+	if (result == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		ResizeWindow(m_swapChainExtent.width, m_swapChainExtent.height);
+	}
+	else
+	{
+		VK_CHECK_RESULT(result);
+	}
 
     RecordGraphicsCommandBuffer(imageIndex);
 
@@ -1528,12 +1564,23 @@ void VulkanAppBase::Update()
 
 	presentInfo.pImageIndices = &imageIndex;
 
-	vkQueuePresentKHR(m_presentQueue, &presentInfo);
+	result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) 
+	{
+		ResizeWindow(m_swapChainExtent.width, m_swapChainExtent.height);
+	}
+	else
+	{
+		VK_CHECK_RESULT(result);
+	}
+
 	m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 {
+	m_hInstance = hInstance;
+
 	Win32Helpers::SetupConsole(m_appName);
     SetupDPIAwareness();
 	const bool enableValidation = options.IsSet("validation");
@@ -1549,16 +1596,16 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 
 	m_computeUBO.ubo.aspectRatio = (float)width / (float)height;
 
-	m_hwnd = SetupWindow(hInstance, width, height, fullscreen);
+	m_hwnd = SetupWindow(width, height, fullscreen);
 
-	bool initResult = InitVulkan(hInstance, enableValidation, preferedGPUIdx, options.IsSet("gpulist"));
+	bool initResult = InitVulkan(enableValidation, preferedGPUIdx, options.IsSet("gpulist"));
     if (!initResult)
 	{
 		VulkanUtils::FatalExit("Failed to init vulkan\n", -1);
 	}
 
-	bool enableVSync = options.IsSet("vsync");
-	CreateSwapChain(hInstance, width, height, enableVSync);
+	m_vsyncEnabled = options.IsSet("vsync");
+	CreateSwapChain(width, height);
 	CreateSwapChainImageViews();
 
 	CreateRenderPass();
@@ -1572,4 +1619,6 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
 	CreateFrameBuffers();
+
+	m_initialized = true;
 }

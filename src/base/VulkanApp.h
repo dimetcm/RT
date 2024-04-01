@@ -24,10 +24,10 @@ public:
 	void Init(HINSTANCE hInstance, const CommandLineOptions& options);
 	void Run();
 private:
-	bool InitVulkan(HINSTANCE hInstance, bool enableValidation,
+	bool InitVulkan(bool enableValidation,
 		std::optional<uint32_t> preferedGPUIdx, bool listDevices);
-	HWND SetupWindow(HINSTANCE hInstance, uint32_t width, uint32_t height, bool fullscreen);
-	void CreateSwapChain(HINSTANCE hInstance, uint32_t width, uint32_t height, bool enableVSync);
+	HWND SetupWindow(uint32_t width, uint32_t height, bool fullscreen);
+	bool CreateSwapChain(uint32_t width, uint32_t height);
 	void CreateSwapChainImageViews();
 
 	bool CreateVulkanInstance(bool enableValidation);
@@ -44,7 +44,9 @@ private:
 	void CreateComputeShaderRenderTarget();
 	void CreateComputeShaderUBO();
 
-	void CleanupSwapChain();
+	void CleanupSwapChain(VkSwapchainKHR swapChain);
+
+	void ResizeWindow(uint32_t width, uint32_t height);
 
 	void RecordComputeCommandBuffer();
 	void RecordGraphicsCommandBuffer(uint32_t imageIndex);
@@ -54,7 +56,11 @@ private:
 	uint32_t GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
 private:
 	HWND m_hwnd;
+	HINSTANCE m_hInstance;
+
+	bool m_initialized = false;
 	bool m_resizing = false;
+	bool m_vsyncEnabled = false;
 
 	VkInstance m_vkInstance;
 	VkPhysicalDevice m_vkPhysicalDevice;
@@ -71,7 +77,7 @@ private:
 	// Surface
 	VkSurfaceKHR m_surface;
 	// Swap chain
-	VkSwapchainKHR m_swapChain;
+	VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
 	
     VkFormat m_swapChainImageFormat;
     VkExtent2D m_swapChainExtent;
