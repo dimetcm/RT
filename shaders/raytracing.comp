@@ -7,6 +7,16 @@ layout (binding = 1) uniform UBO
 	float aspectRatio;
 } ubo;
 
+struct sphere
+{
+    vec3 center;
+    float radius;
+};
+
+layout(std140, binding = 2) readonly buffer spheresIn 
+{
+   sphere spheres[];
+};
 
 float infinity = 1.0 / 0.0;
 
@@ -60,14 +70,6 @@ struct raycast_result
     float t;
     bool front_face;
 };
-
-struct sphere
-{
-    vec3 center;
-    float radius;
-};
-
-sphere spheres[2];
 
 raycast_result raycast_sphere(ray r, interval i, sphere s)
 {
@@ -163,10 +165,6 @@ void main()
     vec3 pixel_center = pixel00_loc + (gl_GlobalInvocationID.x * pixel_delta_u) + (gl_GlobalInvocationID.y * pixel_delta_v);
     vec3 ray_direction = pixel_center - camera_center;
 
-    spheres[0] = sphere(vec3(0.0, 0.0, -1.0), 0.5);
-    spheres[1] = sphere(vec3(0.0,-100.5,-1.0), 100.0);
-
     vec4 finalColor = vec4(ray_color(ray(camera_center, ray_direction)), 0);
-
-	imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), finalColor);
+    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), finalColor);
 }

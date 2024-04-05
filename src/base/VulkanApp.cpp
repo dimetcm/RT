@@ -1,6 +1,7 @@
 #include "VulkanApp.h"
 #include "Win32Helpers.h"
 #include "VulkanUtils.h"
+#include "World.h"
 
 #include <ShellScalingAPI.h>
 #include <iostream>
@@ -97,13 +98,17 @@ uint32_t VulkanAppBase::GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyF
 	return -1;
 }
 
-VulkanAppBase::VulkanAppBase(const std::string& appName)
+VulkanAppBase::VulkanAppBase(const World& world, const std::string& appName)
 	: m_appName(appName)
+	, m_world(world)
 {}
 
 VulkanAppBase::~VulkanAppBase()
 {
 	CleanupSwapChain(m_swapChain);
+
+	vkDestroyBuffer(m_vkDevice, m_computeSSOBuffer, nullptr);
+	vkFreeMemory(m_vkDevice, m_computeSSOBufferMemory, nullptr);
 
 	vkDestroyImageView(m_vkDevice, m_computeTargetTexture.descriptor.imageView, nullptr);
 	vkDestroySampler(m_vkDevice, m_computeTargetTexture.descriptor.sampler, nullptr);
@@ -243,7 +248,6 @@ bool VulkanAppBase::CreateVulkanInstance(bool enableValidation)
 	{
 		requiredExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	}
-
 
 	VkInstanceCreateInfo instanceCreateInfo = {};
 	instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -1158,6 +1162,90 @@ void VulkanAppBase::CreateComputeShaderUBO()
 	}
 }
 
+void VulkanAppBase::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+	VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+{
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = size;
+	bufferInfo.usage = usage;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VK_CHECK_RESULT_MSG(vkCreateBuffer(m_vkDevice, &bufferInfo, nullptr, &buffer), "Failed to create buffer!");
+
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(m_vkDevice, buffer, &memRequirements);
+
+	VkMemoryAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = GetDeviceMemoryType(memRequirements.memoryTypeBits, properties);
+
+	VK_CHECK_RESULT_MSG(vkAllocateMemory(m_vkDevice, &allocInfo, nullptr, &bufferMemory),
+		"Failed to allocate buffer memory!");
+
+	vkBindBufferMemory(m_vkDevice, buffer, bufferMemory, 0);
+}
+
+void VulkanAppBase::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = m_commandPool;
+	allocInfo.commandBufferCount = 1;
+
+	VkCommandBuffer commandBuffer;
+	vkAllocateCommandBuffers(m_vkDevice, &allocInfo, &commandBuffer);
+
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+	VkBufferCopy copyRegion{};
+	copyRegion.size = size;
+	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+	vkEndCommandBuffer(commandBuffer);
+
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+
+	vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+	vkQueueWaitIdle(m_graphicsQueue);
+}
+
+void VulkanAppBase::CreateComputeShaderSSBO()
+{
+	VkDeviceSize bufferSize = std::max<VkDeviceSize>(1u, m_world.spheres.size() * sizeof(Sphere));
+
+	// Create a staging buffer used to upload data to the gpu
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+	if (!m_world.spheres.empty())
+	{
+		void* data;
+		vkMapMemory(m_vkDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, m_world.spheres.data(), (size_t)bufferSize);
+		vkUnmapMemory(m_vkDevice, stagingBufferMemory);
+	}
+
+	CreateBuffer(bufferSize,
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_computeSSOBuffer, m_computeSSOBufferMemory);
+	CopyBuffer(stagingBuffer, m_computeSSOBuffer, bufferSize);
+
+	vkDestroyBuffer(m_vkDevice, stagingBuffer, nullptr);
+	vkFreeMemory(m_vkDevice, stagingBufferMemory, nullptr);
+}
+
 void VulkanAppBase::CreateGraphicsPipeline()
 {
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{};
@@ -1319,9 +1407,17 @@ void VulkanAppBase::CreateComputePipeline()
 	uboBinding.binding = 1;
 	uboBinding.descriptorCount = 1;
 
-	std::array<VkDescriptorSetLayoutBinding, 2> setLayoutBindings = {
+	VkDescriptorSetLayoutBinding spheresBinding{};
+	spheresBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	spheresBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	spheresBinding.binding = 2;
+	spheresBinding.descriptorCount = 1;
+
+	std::array<VkDescriptorSetLayoutBinding, 3> setLayoutBindings
+	{
 		storageImageBinding,
-		uboBinding
+		uboBinding,
+		spheresBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
@@ -1388,6 +1484,21 @@ void VulkanAppBase::CreateComputePipeline()
 
 		computeWriteDescriptorSets.push_back(ubo);
 	}
+
+	VkDescriptorBufferInfo ssboBufferInfo{};
+	ssboBufferInfo.buffer = m_computeSSOBuffer;
+	ssboBufferInfo.offset = 0;
+	ssboBufferInfo.range = std::max<VkDeviceSize>(1, sizeof(Sphere) * m_world.spheres.size());
+
+	VkWriteDescriptorSet ssbo{};
+	ssbo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	ssbo.dstSet = m_computeDescriptorSet;
+	ssbo.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	ssbo.dstBinding = 2;
+	ssbo.descriptorCount = 1;
+	ssbo.pBufferInfo = &ssboBufferInfo;
+
+	computeWriteDescriptorSets.push_back(ssbo);
 
 	vkUpdateDescriptorSets(m_vkDevice,
 		static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
@@ -1615,6 +1726,7 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 
 	CreateDescriptorPool();
 	CreateComputeShaderUBO();
+	CreateComputeShaderSSBO();
 	CreateComputeShaderRenderTarget();
 	CreateGraphicsPipeline();
 	CreateComputePipeline();

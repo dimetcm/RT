@@ -1,4 +1,5 @@
 #include "Win32Helpers.h"
+
 #include <windows.h>
 
 namespace Win32Helpers

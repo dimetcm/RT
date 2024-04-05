@@ -13,10 +13,12 @@
 
 #include <optional>
 
+struct World;
+
 class VulkanAppBase
 {
 public:
-	VulkanAppBase(const std::string& appName = "VulkanApp");
+	VulkanAppBase(const World& world, const std::string& appName = "VulkanApp");
 	virtual ~VulkanAppBase();
 
 	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
@@ -43,6 +45,11 @@ private:
 	void CreateFrameBuffers();
 	void CreateComputeShaderRenderTarget();
 	void CreateComputeShaderUBO();
+	void CreateComputeShaderSSBO();
+	
+	void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+		VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+	void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
 	void CleanupSwapChain(VkSwapchainKHR swapChain);
 
@@ -54,7 +61,7 @@ private:
 	void Update();
 
 	uint32_t GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
-private:
+	private:
 	HWND m_hwnd;
 	HINSTANCE m_hInstance;
 
@@ -131,23 +138,28 @@ private:
 		} ubo;
 	} m_computeUBO;
 
+	VkBuffer m_computeSSOBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_computeSSOBufferMemory = VK_NULL_HANDLE;
+
 	uint32_t m_currentFrame = 0;
 
 	std::string m_appName;
+
+	const World& m_world;
 
 	friend LRESULT WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
 
 template<class T>
 requires std::derived_from<T, VulkanAppBase>
-int StartApp(HINSTANCE hInstance, const CommandLineArgs& args)
+int StartApp(const World& world, HINSTANCE hInstance, const CommandLineArgs& args)
 {
 #if defined(DEBUG) | defined(_DEBUG)
 	_CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 #endif
 
 	{
-		T app;
+		T app(world);
 		CommandLineOptions commandLineOptions;
 		app.RegisterCommandLineOptions(commandLineOptions);
 		commandLineOptions.Parse(args);
