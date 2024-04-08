@@ -12,13 +12,14 @@
 #include <crtdbg.h>
 
 #include <optional>
+#include <chrono>
 
 struct World;
 
 class VulkanAppBase
 {
 public:
-	VulkanAppBase(const World& world, const std::string& appName = "VulkanApp");
+	VulkanAppBase(World& world, const std::string& appName = "VulkanApp");
 	virtual ~VulkanAppBase();
 
 	virtual void RegisterCommandLineOptions(CommandLineOptions& options) const;
@@ -58,7 +59,7 @@ private:
 	void RecordComputeCommandBuffer();
 	void RecordGraphicsCommandBuffer(uint32_t imageIndex);
 
-	void Update();
+	void Update(float deltaTime);
 
 	uint32_t GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
 	private:
@@ -134,6 +135,8 @@ private:
 		std::vector<void*> mappedBuffers;
 		struct UniformBuffer
 		{
+			glm::vec4 cameraPosition;
+			glm::vec4 cameraDirection;
 			float aspectRatio = 1.0f;
 		} ubo;
 	} m_computeUBO;
@@ -145,14 +148,24 @@ private:
 
 	std::string m_appName;
 
-	const World& m_world;
+	World& m_world;
+
+	std::chrono::time_point<std::chrono::high_resolution_clock> m_lastFrameTime;
+
+	struct
+	{
+		bool leftPressed = false;
+		bool rightPressed = false;
+		bool forwardPressed = false;
+		bool backPressed = false;
+	} m_input;
 
 	friend LRESULT WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
 
 template<class T>
 requires std::derived_from<T, VulkanAppBase>
-int StartApp(const World& world, HINSTANCE hInstance, const CommandLineArgs& args)
+int StartApp(World& world, HINSTANCE hInstance, const CommandLineArgs& args)
 {
 #if defined(DEBUG) | defined(_DEBUG)
 	_CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );

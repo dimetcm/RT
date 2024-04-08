@@ -5,8 +5,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPSTR cmdLine, i
 {
     World world;
 
+    world.camera.position = glm::vec3(0.0f, 0.0f, -2.0f);
+    world.camera.direction = glm::vec3(0.0f, 0.0f, 1.0f);
+
     Sphere s1(glm::vec3(0.0f, 0.0f, -1.0f), 0.5f);
-    Sphere s2(glm::vec3(0.0,-100.5,-1.0), 100.0);
+    Sphere s2(glm::vec3(0.0f,-100.5f,-1.0f), 100.0f);
 
     world.spheres.push_back(s1);
     world.spheres.push_back(s2);

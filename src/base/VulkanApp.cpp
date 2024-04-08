@@ -98,7 +98,7 @@ uint32_t VulkanAppBase::GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyF
 	return -1;
 }
 
-VulkanAppBase::VulkanAppBase(const World& world, const std::string& appName)
+VulkanAppBase::VulkanAppBase(World& world, const std::string& appName)
 	: m_appName(appName)
 	, m_world(world)
 {}
@@ -556,7 +556,40 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case VK_ESCAPE:
 			PostQuitMessage(0);
 			break;
+		case VK_KEY_W:
+			app->m_input.forwardPressed = true;
+			break;
+		case VK_KEY_S:
+			app->m_input.backPressed = true;
+			break;
+		case VK_KEY_A:
+			app->m_input.leftPressed = true;
+			break;
+		case VK_KEY_D:
+			app->m_input.rightPressed = true;
+			break;
 		}
+		break;
+	case WM_KEYUP:
+		switch (wParam)
+		{
+		case VK_ESCAPE:
+			PostQuitMessage(0);
+			break;
+		case VK_KEY_W:
+			app->m_input.forwardPressed = false;
+			break;
+		case VK_KEY_S:
+			app->m_input.backPressed = false;
+			break;
+		case VK_KEY_A:
+			app->m_input.leftPressed = false;
+			break;
+		case VK_KEY_D:
+			app->m_input.rightPressed = false;
+			break;
+		}
+		break;
 	case WM_SIZE:
 		if (app->m_initialized && wParam != SIZE_MINIMIZED)
 		{
@@ -1508,6 +1541,12 @@ void VulkanAppBase::CreateComputePipeline()
 
 void VulkanAppBase::Run()
 {
+	std::chrono::time_point<std::chrono::high_resolution_clock> frameTime =
+		std::chrono::high_resolution_clock::now();
+
+	const std::chrono::duration<float> deltaTime = frameTime - m_lastFrameTime;
+	m_lastFrameTime = frameTime;
+
 	bool quitMessageReceived = false;
 	while (!quitMessageReceived) 
 	{
@@ -1524,7 +1563,7 @@ void VulkanAppBase::Run()
 		}
 		if (!IsIconic(m_hwnd))
 		{
-			Update();
+			Update(deltaTime.count());
 		}
 	}
 
@@ -1602,8 +1641,33 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 		"Failed to record command buffer!");
 }
 
-void VulkanAppBase::Update()
+void VulkanAppBase::Update(float deltaTime)
 {
+	// update camera
+	{
+		const float cameraSpeed = 1000.0f * deltaTime;
+
+		if (m_input.forwardPressed)
+		{
+			m_world.camera.position += m_world.camera.direction * cameraSpeed;
+		}
+		if (m_input.backPressed)
+		{
+			m_world.camera.position -= m_world.camera.direction * cameraSpeed;
+		}
+		if (m_input.leftPressed)
+		{
+			m_world.camera.position -= glm::cross(m_world.camera.direction, glm::vec3(0.0f, 1.0f, 0.0f)) * cameraSpeed;
+		}
+		if (m_input.rightPressed)
+		{
+			m_world.camera.position += glm::cross(m_world.camera.direction, glm::vec3(0.0f, 1.0f, 0.0f)) * cameraSpeed;
+		}
+	}
+
+	m_computeUBO.ubo.cameraPosition = glm::vec4(m_world.camera.position, 0.0f);
+	m_computeUBO.ubo.cameraDirection = glm::vec4(m_world.camera.direction, 0.0f);
+
 	void* uboMapped = nullptr;
 	VK_CHECK_RESULT(vkMapMemory(m_vkDevice, m_computeUBO.vkBuffersMemory[m_currentFrame], 0, VK_WHOLE_SIZE, 0, &uboMapped));
 	memcpy(uboMapped, &m_computeUBO.ubo, sizeof(ComputeUBO::UniformBuffer));
@@ -1731,6 +1795,8 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
 	CreateFrameBuffers();
+
+	m_lastFrameTime = std::chrono::high_resolution_clock::now();
 
 	m_initialized = true;
 }
