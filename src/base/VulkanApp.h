@@ -60,6 +60,7 @@ private:
 	void RecordGraphicsCommandBuffer(uint32_t imageIndex);
 
 	void Update(float deltaTime);
+	void UpdateCamera(float deltaTime);
 
 	uint32_t GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
 	private:
