@@ -594,8 +594,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			break;
 		}
 		break;
+	case WM_LBUTTONDOWN:
+		app->m_input.mousePosition = glm::vec2((float)LOWORD(lParam), (float)HIWORD(lParam));
+		app->m_input.leftMouseButtonPressed = true;
+		break;
+	case WM_LBUTTONUP:
+		app->m_input.leftMouseButtonPressed = false;
+		break;
+	case WM_MOUSEMOVE:
+		{
+			glm::vec2 mousePosition = glm::vec2((float)LOWORD(lParam), (float)HIWORD(lParam));
+			app->m_input.mouseDelta = app->m_input.mousePosition - mousePosition;
+			app->m_input.mousePosition = mousePosition;
+			break;
+		}
 	case WM_SIZE:
-		if (app->m_initialized && wParam != SIZE_MINIMIZED)
+		if (app && app->m_initialized && wParam != SIZE_MINIMIZED)
 		{
 			if (app->m_resizing || wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
 			{
@@ -1648,6 +1662,7 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 void VulkanAppBase::UpdateCamera(float deltaTime)
 {
 	const float cameraSpeed = 10000.0f * deltaTime;
+	const glm::vec3 upVector(0.0f, 1.0f, 0.0f);
 
 	if (m_input.forwardPressed)
 	{
@@ -1659,33 +1674,24 @@ void VulkanAppBase::UpdateCamera(float deltaTime)
 	}
 	if (m_input.leftPressed)
 	{
-		m_world.camera.position -= glm::cross(m_world.camera.direction, glm::vec3(0.0f, 1.0f, 0.0f)) * cameraSpeed;
+		m_world.camera.position -= glm::cross(m_world.camera.direction, upVector) * cameraSpeed;
 	}
 	if (m_input.rightPressed)
 	{
-		m_world.camera.position += glm::cross(m_world.camera.direction, glm::vec3(0.0f, 1.0f, 0.0f)) * cameraSpeed;
+		m_world.camera.position += glm::cross(m_world.camera.direction, upVector) * cameraSpeed;
 	}
 
-	if (RECT rect; GetWindowRect(m_hwnd, &rect))
+	if (m_input.leftMouseButtonPressed)
 	{
-		// Center on screen
-		uint32_t x = (GetSystemMetrics(SM_CXSCREEN) - rect.right) / 2;
-		uint32_t y = (GetSystemMetrics(SM_CYSCREEN) - rect.bottom) / 2;
+		m_world.camera.direction = glm::rotate(
+			m_world.camera.direction, m_input.mouseDelta.x * 0.005f, upVector);
 
-		if (POINT point; GetCursorPos(&point))
-		{
-			glm::vec2 mousePos = glm::vec2(point.x, point.y);
-			glm::vec2 delta = glm::vec2(x, y) - mousePos;
-
-			m_world.camera.direction = glm::rotate(
-				m_world.camera.direction, delta.x * 0.001f, glm::vec3(0.0f, 1.0f, 0.0f));
-
-			m_world.camera.direction = glm::rotate(
-				m_world.camera.direction, delta.y * 0.001f, glm::cross(m_world.camera.direction, glm::vec3(0.0f, 1.0f, 0.0f)));
-
-			SetCursorPos(x, y);
-		}
+		m_world.camera.direction = glm::rotate(
+			m_world.camera.direction, m_input.mouseDelta.y * 0.005f,
+			glm::cross(m_world.camera.direction, upVector));
 	}
+
+	m_input.mouseDelta = glm::vec2(0.0f, 0.0f);
 }
 
 void VulkanAppBase::Update(float deltaTime)
@@ -1822,14 +1828,6 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
 	CreateFrameBuffers();
-
-	if (RECT rect; GetWindowRect(m_hwnd, &rect))
-	{
-		// Center on screen
-		uint32_t x = (GetSystemMetrics(SM_CXSCREEN) - rect.right) / 2;
-		uint32_t y = (GetSystemMetrics(SM_CYSCREEN) - rect.bottom) / 2;
-		SetCursorPos(x, y);
-	}
 
 	m_lastFrameTime = std::chrono::high_resolution_clock::now();
 

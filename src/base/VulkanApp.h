@@ -155,6 +155,10 @@ private:
 
 	struct
 	{
+		glm::vec2 mousePosition;
+		glm::vec2 mouseDelta = glm::vec2(0.0f, 0.0f);
+		bool leftMouseButtonPressed = false;
+
 		bool leftPressed = false;
 		bool rightPressed = false;
 		bool forwardPressed = false;
