@@ -20,10 +20,15 @@ layout(std140, binding = 2) readonly buffer spheresIn
    sphere spheres[];
 };
 
-float pi =3.1415926535897932384626433832795;
+float pi = 3.1415926535897932384626433832795;
 float half_pi = pi / 2.0;
 
 float infinity = 1.0 / 0.0;
+
+float random(vec2 st)
+{
+    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
 
 struct interval
 {
@@ -176,9 +181,29 @@ void main()
                              - focal_length * w - viewport_u / 2.0f - viewport_v / 2.0;
     vec3 pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
-    vec3 pixel_center = pixel00_loc + (gl_GlobalInvocationID.x * pixel_delta_u) + (gl_GlobalInvocationID.y * pixel_delta_v);
-    vec3 ray_direction = pixel_center - camPos;
+    // add time?
+    vec2 state = gl_GlobalInvocationID.xy;
+    
+    // multisampling
+    uint samplesCount = 10;
+    float sample_weight = 1.0f / samplesCount;
 
-    vec4 finalColor = vec4(ray_color(ray(camPos, ray_direction)), 0);
+    vec4 finalColor = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < samplesCount; ++i)
+    {
+        // generate random offset in [-0.5f, 0.5f] range
+        float xoffset = random(state) - 1.0f;
+        state = state + vec2(xoffset * 7, xoffset * 13);
+        float yoffset = random(state) - 1.0f;
+        state = state + vec2(yoffset * 17, yoffset * 11);
+
+        vec3 pixel_center = pixel00_loc + 
+            ((gl_GlobalInvocationID.x + xoffset) * pixel_delta_u) +
+            ((gl_GlobalInvocationID.y + yoffset) * pixel_delta_v);
+        vec3 ray_direction = pixel_center - camPos;
+
+        finalColor += vec4(ray_color(ray(camPos, ray_direction)) * sample_weight, 0);
+    } 
+
     imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), finalColor);
 }
