@@ -4,9 +4,9 @@ layout (binding = 0, rgba8) uniform writeonly image2D resultImage;
 
 layout (binding = 1) uniform UBO 
 {
-    vec4 cameraPosition;
-    vec4 cameraDirection;
-	float aspectRatio;
+    vec4 camera_position;
+    vec4 camera_direction;
+	float aspect_ratio;
 } ubo;
 
 struct sphere
@@ -25,9 +25,30 @@ float half_pi = pi / 2.0;
 
 float infinity = 1.0 / 0.0;
 
-float random(vec2 st)
+float random(inout vec2 state)
 {
-    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+    float v = fract(sin(dot(state.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+    state = vec2(state.y + v * 7.1243, state.x + v * 13.63456);
+    return v;
+}
+
+vec3 random_in_unit_sphere(inout vec2 state)
+{
+    return vec3(random(state) * 2.0 - 1.0, random(state) * 2.0 - 1.0, random(state) * 2.0 - 1.0);
+}
+
+vec3 random_unit_vector(inout vec2 state) 
+{
+    return normalize(random_in_unit_sphere(state));
+}
+
+vec3 random_on_hemisphere(vec3 normal, inout vec2 state)
+{
+    vec3 on_unit_sphere = random_unit_vector(state);
+    if (dot(on_unit_sphere, normal) > 0.0) // In the same hemisphere as the normal
+        return on_unit_sphere;
+    else
+        return -on_unit_sphere;
 }
 
 struct interval
@@ -123,38 +144,14 @@ raycast_result raycast_sphere(ray r, interval i, sphere s)
     }
 }
 
-vec3 ray_color(ray r)
-{
-    raycast_result result;
-    float ray_tmax = infinity;
-    for (int i = 0; i < spheres.length(); ++i)
-    {
-        result = raycast_sphere(r, interval(0, ray_tmax), spheres[i]);
-        if (result.t < ray_tmax)
-        {
-            ray_tmax = result.t;
-        }
-    }
-
-    if (ray_tmax != infinity)
-    {
-        return 0.5 * (result.normal + vec3(1.0, 1.0, 1.0));
-    }
-
-    vec3 unit_direction = normalize(r.direction);
-
-    float a = 0.5*(unit_direction.y + 1.0);
-    return (1.0-a)*vec3(1.0, 1.0, 1.0) + a*vec3(0.5, 0.7, 1.0);
-} 
-
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 void main()
 {
     ivec2 dim = imageSize(resultImage);
 
     // Camera
-    vec3 camPos = ubo.cameraPosition.xyz;
-    vec3 camDir = ubo.cameraDirection.xyz;
+    vec3 cam_pos = ubo.camera_position.xyz;
+    vec3 cam_dir = ubo.camera_direction.xyz;
     vec3 vup = vec3(0,1,0);     // Camera-relative "up" direction
 
     float focal_length = 1.0;
@@ -162,9 +159,9 @@ void main()
     float h = tan(vfov / 2.0);
 
     float viewport_height = 2.0 * h * focal_length;
-    float viewport_width = viewport_height * ubo.aspectRatio;
+    float viewport_width = viewport_height * ubo.aspect_ratio;
     
-    vec3 w = -camDir;
+    vec3 w = -cam_dir;
     vec3 u = cross(vup, w);
     vec3 v = cross(w, u);
 
@@ -177,7 +174,7 @@ void main()
     vec3 pixel_delta_v = viewport_v / dim.y;
 
     // Calculate the location of the upper left pixel.
-    vec3 viewport_upper_left = camPos
+    vec3 viewport_upper_left = cam_pos
                              - focal_length * w - viewport_u / 2.0f - viewport_v / 2.0;
     vec3 pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
@@ -185,25 +182,65 @@ void main()
     vec2 state = gl_GlobalInvocationID.xy;
     
     // multisampling
-    uint samplesCount = 10;
-    float sample_weight = 1.0f / samplesCount;
+    uint samples_count = 10;
+    float sample_weight = 1.0f / (samples_count * 1.0f);
 
-    vec4 finalColor = vec4(0.0f, 0.0f, 0.0f, 0.0f);
-    for (int i = 0; i < samplesCount; ++i)
+    vec4 final_color = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    for (int i = 0; i < samples_count; ++i)
     {
         // generate random offset in [-0.5f, 0.5f] range
-        float xoffset = random(state) - 1.0f;
-        state = state + vec2(xoffset * 7, xoffset * 13);
-        float yoffset = random(state) - 1.0f;
-        state = state + vec2(yoffset * 17, yoffset * 11);
-
+        float xoffset = random(state) - 0.5f;
+        float yoffset = random(state) - 0.5f;
+        
         vec3 pixel_center = pixel00_loc + 
             ((gl_GlobalInvocationID.x + xoffset) * pixel_delta_u) +
             ((gl_GlobalInvocationID.y + yoffset) * pixel_delta_v);
-        vec3 ray_direction = pixel_center - camPos;
+        vec3 ray_direction = pixel_center - cam_pos;
 
-        finalColor += vec4(ray_color(ray(camPos, ray_direction)) * sample_weight, 0);
+        ray r = ray(cam_pos, normalize(ray_direction));
+        vec3 color = vec3(0.0f, 0.0f, 0.0f);
+        float color_multiplier = 1.0f;
+        const uint max_depth = 10;
+
+        for (int d = 0; d < max_depth; ++d)
+        {
+            raycast_result result;
+            float ray_tmax = infinity;
+            for (int s = 0; s < spheres.length(); ++s)
+            {
+                result = raycast_sphere(r, interval(0, ray_tmax), spheres[s]);
+                if (result.t < ray_tmax)
+                {
+                    ray_tmax = result.t;
+                }
+            }
+
+            if (ray_tmax != infinity)
+            {                
+                vec3 random_vec = random_on_hemisphere(result.normal, state);
+                if (dot(result.normal, random_vec) < 0.0f)
+                {
+                    random_vec = -random_vec;
+                }
+
+                random_vec += result.normal;
+                random_vec = normalize(random_vec);
+                color_multiplier *= 0.5f;
+                r = ray(result.point + random_vec * 0.0001f, random_vec);
+            }
+            else
+            {
+                vec3 unit_direction = normalize(r.direction);
+
+                float a = 0.5 * (unit_direction.y + 1.0);
+                color = (1.0 - a) * vec3(1.0, 1.0, 1.0) + a * vec3(0.5, 0.7, 1.0);
+                break;
+            }
+        }
+
+        final_color += vec4(color, 0) * color_multiplier * sample_weight;
     } 
 
-    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), finalColor);
+    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), final_color);
 }
