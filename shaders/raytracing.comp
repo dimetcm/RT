@@ -13,6 +13,10 @@ struct sphere
 {
     vec3 center;
     float radius;
+    uint materialType;
+    uint materialIdx;
+    uint _dummy1;
+    uint _dummy2;
 };
 
 layout(std140, binding = 2) readonly buffer spheresIn 
