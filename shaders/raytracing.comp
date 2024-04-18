@@ -13,8 +13,8 @@ struct sphere
 {
     vec3 center;
     float radius;
-    uint materialType;
-    uint materialIdx;
+    uint material_type;
+    uint material_idx;
     uint _dummy1;
     uint _dummy2;
 };
@@ -28,6 +28,9 @@ float pi = 3.1415926535897932384626433832795;
 float half_pi = pi / 2.0;
 
 float infinity = 1.0 / 0.0;
+
+const uint lambert_material_type = 0x00000000u;
+const uint metal_material_type = 0x00000001u;
 
 float random(inout vec2 state)
 {
@@ -104,6 +107,7 @@ struct raycast_result
     vec3 normal;
     float t;
     bool front_face;
+    uint material_type;
 };
 
 raycast_result raycast_sphere(ray r, interval i, sphere s)
@@ -143,7 +147,7 @@ raycast_result raycast_sphere(ray r, interval i, sphere s)
 
         result.front_face = dot(r.direction, outward_normal) < 0;
         result.normal = result.front_face ? outward_normal : -outward_normal;
-
+        result.material_type = s.material_type;
         return result;
     }
 }
@@ -221,17 +225,25 @@ void main()
             }
 
             if (ray_tmax != infinity)
-            {                
-                vec3 random_vec = random_on_hemisphere(result.normal, state);
-                if (dot(result.normal, random_vec) < 0.0f)
+            {
+                if (result.material_type == lambert_material_type)
                 {
-                    random_vec = -random_vec;
-                }
+                    vec3 random_vec = random_on_hemisphere(result.normal, state);
+                    if (dot(result.normal, random_vec) < 0.0f)
+                    {
+                        random_vec = -random_vec;
+                    }
 
-                random_vec += result.normal;
-                random_vec = normalize(random_vec);
-                color_multiplier *= 0.5f;
-                r = ray(result.point + random_vec * 0.0001f, random_vec);
+                    random_vec += result.normal;
+                    random_vec = normalize(random_vec);
+                    color_multiplier *= 0.5f;
+                    r = ray(result.point + random_vec * 0.0001f, random_vec);
+                }
+                else if (result.material_type == metal_material_type)
+                {
+                    vec3 reflected = reflect(r.direction, result.normal);
+                    r = ray(result.point + reflected * 0.0001f, reflected);
+                }
             }
             else
             {
