@@ -24,6 +24,17 @@ layout(std140, binding = 2) readonly buffer spheresIn
    sphere spheres[];
 };
 
+struct lambertianMaterial
+{
+    vec3 albedo;
+    float dummy;
+};
+
+layout(std140, binding = 3) readonly buffer lambertianMaterialsIn 
+{
+   lambertianMaterial lambertianMaterials[];
+};
+
 float pi = 3.1415926535897932384626433832795;
 float half_pi = pi / 2.0;
 
@@ -108,6 +119,7 @@ struct raycast_result
     float t;
     bool front_face;
     uint material_type;
+    uint material_idx;
 };
 
 raycast_result raycast_sphere(ray r, interval i, sphere s)
@@ -148,6 +160,7 @@ raycast_result raycast_sphere(ray r, interval i, sphere s)
         result.front_face = dot(r.direction, outward_normal) < 0;
         result.normal = result.front_face ? outward_normal : -outward_normal;
         result.material_type = s.material_type;
+        result.material_idx = s.material_idx;
         return result;
     }
 }
@@ -236,8 +249,10 @@ void main()
 
                     random_vec += result.normal;
                     random_vec = normalize(random_vec);
-                    color_multiplier *= 0.5f;
+                    //color_multiplier *= 0.5f;
                     r = ray(result.point + random_vec * 0.0001f, random_vec);
+                    color = lambertianMaterials[result.material_idx].albedo;
+                    break;
                 }
                 else if (result.material_type == metal_material_type)
                 {

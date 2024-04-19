@@ -13,6 +13,7 @@ enum class MaterialType : uint32_t
 struct LambertianMaterialProperties 
 {
     glm::vec3 albedo;
+    float dummy;
 };
 
 struct MetalMaterialProperties 

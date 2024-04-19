@@ -1272,7 +1272,10 @@ void VulkanAppBase::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceS
 
 void VulkanAppBase::CreateComputeShaderSSBO()
 {
-	VkDeviceSize bufferSize = std::max<VkDeviceSize>(1u, m_world.spheres.size() * sizeof(Sphere));
+	VkDeviceSize bufferSize = std::max<VkDeviceSize>(1u,
+		m_world.spheres.size() * sizeof(Sphere) + 
+		m_world.materialManager.lambertianMaterials.size() * sizeof(LambertianMaterialProperties) +
+		m_world.materialManager.metalMaterials.size() * sizeof(MetalMaterialProperties));
 
 	// Create a staging buffer used to upload data to the gpu
 	VkBuffer stagingBuffer;
@@ -1284,7 +1287,9 @@ void VulkanAppBase::CreateComputeShaderSSBO()
 	{
 		void* data;
 		vkMapMemory(m_vkDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, m_world.spheres.data(), (size_t)bufferSize);
+		memcpy(data, m_world.spheres.data(), m_world.spheres.size() * sizeof(Sphere));
+		memcpy((char*)data + m_world.spheres.size() * sizeof(Sphere),
+			m_world.materialManager.lambertianMaterials.data(), m_world.materialManager.lambertianMaterials.size() * sizeof(LambertianMaterialProperties));
 		vkUnmapMemory(m_vkDevice, stagingBufferMemory);
 	}
 
@@ -1464,11 +1469,18 @@ void VulkanAppBase::CreateComputePipeline()
 	spheresBinding.binding = 2;
 	spheresBinding.descriptorCount = 1;
 
-	std::array<VkDescriptorSetLayoutBinding, 3> setLayoutBindings
+	VkDescriptorSetLayoutBinding lambertMaterialsBinding{};
+	lambertMaterialsBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	lambertMaterialsBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	lambertMaterialsBinding.binding = 3;
+	lambertMaterialsBinding.descriptorCount = 1;
+
+	std::array<VkDescriptorSetLayoutBinding, 4> setLayoutBindings
 	{
 		storageImageBinding,
 		uboBinding,
-		spheresBinding
+		spheresBinding,
+		lambertMaterialsBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
@@ -1536,20 +1548,42 @@ void VulkanAppBase::CreateComputePipeline()
 		computeWriteDescriptorSets.push_back(ubo);
 	}
 
-	VkDescriptorBufferInfo ssboBufferInfo{};
-	ssboBufferInfo.buffer = m_computeSSOBuffer;
-	ssboBufferInfo.offset = 0;
-	ssboBufferInfo.range = std::max<VkDeviceSize>(1, sizeof(Sphere) * m_world.spheres.size());
+	VkDeviceSize spheresSize = std::max<VkDeviceSize>(1, sizeof(Sphere) * m_world.spheres.size());
 
-	VkWriteDescriptorSet ssbo{};
-	ssbo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	ssbo.dstSet = m_computeDescriptorSet;
-	ssbo.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	ssbo.dstBinding = 2;
-	ssbo.descriptorCount = 1;
-	ssbo.pBufferInfo = &ssboBufferInfo;
+	{
+		VkDescriptorBufferInfo ssboSpheresBufferInfo{};
+		ssboSpheresBufferInfo.buffer = m_computeSSOBuffer;
+		ssboSpheresBufferInfo.offset = 0;
+		ssboSpheresBufferInfo.range = spheresSize;
 
-	computeWriteDescriptorSets.push_back(ssbo);
+		VkWriteDescriptorSet ssboSpheres{};
+		ssboSpheres.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ssboSpheres.dstSet = m_computeDescriptorSet;
+		ssboSpheres.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		ssboSpheres.dstBinding = 2;
+		ssboSpheres.descriptorCount = 1;
+		ssboSpheres.pBufferInfo = &ssboSpheresBufferInfo;
+
+		computeWriteDescriptorSets.push_back(ssboSpheres);
+	}
+
+	{
+		VkDescriptorBufferInfo ssboLambertianMaterialsBufferInfo{};
+		ssboLambertianMaterialsBufferInfo.buffer = m_computeSSOBuffer;
+		ssboLambertianMaterialsBufferInfo.offset = spheresSize;
+		ssboLambertianMaterialsBufferInfo.range = std::max<VkDeviceSize>(1,
+			sizeof(LambertianMaterialProperties) * m_world.materialManager.lambertianMaterials.size());
+
+		VkWriteDescriptorSet ssboLambertianMaterials{};
+		ssboLambertianMaterials.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ssboLambertianMaterials.dstSet = m_computeDescriptorSet;
+		ssboLambertianMaterials.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		ssboLambertianMaterials.dstBinding = 3;
+		ssboLambertianMaterials.descriptorCount = 1;
+		ssboLambertianMaterials.pBufferInfo = &ssboLambertianMaterialsBufferInfo;
+
+		computeWriteDescriptorSets.push_back(ssboLambertianMaterials);
+	}
 
 	vkUpdateDescriptorSets(m_vkDevice,
 		static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
