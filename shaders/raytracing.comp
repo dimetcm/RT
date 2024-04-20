@@ -43,6 +43,12 @@ float infinity = 1.0 / 0.0;
 const uint lambert_material_type = 0x00000000u;
 const uint metal_material_type = 0x00000001u;
 
+bool is_nearly_zero(vec3 v)
+{
+    const float s = 1e-8;
+    return (abs(v[0]) < s) && (abs(v[1]) < s) && (abs(v[2]) < s);
+}
+
 float random(inout vec2 state)
 {
     float v = fract(sin(dot(state.xy, vec2(12.9898, 78.233))) * 43758.5453123);
@@ -220,11 +226,12 @@ void main()
         vec3 ray_direction = pixel_center - cam_pos;
 
         ray r = ray(cam_pos, normalize(ray_direction));
-        vec3 color = vec3(0.0f, 0.0f, 0.0f);
-        float color_multiplier = 1.0f;
+
+        vec3 color = vec3(1.0f, 1.0f, 1.0f);
         const uint max_depth = 10;
 
-        for (int d = 0; d < max_depth; ++d)
+        int d = 0;
+        for (; d < max_depth; ++d)
         {
             raycast_result result;
             float ray_tmax = infinity;
@@ -248,16 +255,35 @@ void main()
                     }
 
                     random_vec += result.normal;
-                    random_vec = normalize(random_vec);
-                    //color_multiplier *= 0.5f;
+
+                    if (is_nearly_zero(random_vec))
+                    {
+                        random_vec = result.normal;
+                    }
+                    else
+                    {
+                        random_vec = normalize(random_vec);
+                    }
+
                     r = ray(result.point + random_vec * 0.0001f, random_vec);
-                    color = lambertianMaterials[result.material_idx].albedo;
-                    break;
+                    color *= lambertianMaterials[result.material_idx].albedo;
                 }
                 else if (result.material_type == metal_material_type)
                 {
                     vec3 reflected = reflect(r.direction, result.normal);
-                    r = ray(result.point + reflected * 0.0001f, reflected);
+                    float fuzz = 0.1;
+                    reflected += (fuzz * random_unit_vector(state));
+
+                    color *= vec3(0.6, 0.6, 0.6);
+
+                    if (dot(reflected, result.normal) > 0.0)
+                    {
+                        r = ray(result.point + reflected * 0.0001f, reflected);
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
             }
             else
@@ -265,12 +291,19 @@ void main()
                 vec3 unit_direction = normalize(r.direction);
 
                 float a = 0.5 * (unit_direction.y + 1.0);
-                color = (1.0 - a) * vec3(1.0, 1.0, 1.0) + a * vec3(0.5, 0.7, 1.0);
+                color *= (1.0 - a) * vec3(1.0, 1.0, 1.0) + a * vec3(0.5, 0.7, 1.0);
                 break;
             }
         }
 
-        final_color += vec4(color, 0) * color_multiplier * sample_weight;
+        if (d == max_depth)
+        {
+            final_color = vec4(0.0, 0.0, 0.0, 0.0);
+        }
+        else
+        {
+            final_color += vec4(color, 0) * sample_weight;
+        }
     } 
 
     imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), final_color);
