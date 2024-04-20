@@ -8,7 +8,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPSTR cmdLine, i
     world.camera.position = glm::vec3(0.0f, 0.0f, -2.0f);
     world.camera.direction = glm::vec3(0.0f, 0.0f, 1.0f);
 
-    MaterialInfo mi1 = world.materialManager.CreateMaterial(MetalMaterialProperties(glm::vec3(1.0f, 0.0f, 0.0f), 0.5f));
+    MaterialInfo mi1 = world.materialManager.CreateMaterial(MetalMaterialProperties(glm::vec3(0.7f, 0.4f, 0.0f), 0.1f));
     MaterialInfo mi2 = world.materialManager.CreateMaterial(LambertianMaterialProperties(glm::vec3(0.1f, 0.8f, 0.3f)));
     MaterialInfo mi3 = world.materialManager.CreateMaterial(LambertianMaterialProperties(glm::vec3(0.2f, 0.1f, 0.5f)));
     MaterialInfo mi4 = world.materialManager.CreateMaterial(LambertianMaterialProperties(glm::vec3(0.3f, 0.3f, 0.9f)));

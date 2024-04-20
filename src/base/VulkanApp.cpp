@@ -1287,9 +1287,20 @@ void VulkanAppBase::CreateComputeShaderSSBO()
 	{
 		void* data;
 		vkMapMemory(m_vkDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, m_world.spheres.data(), m_world.spheres.size() * sizeof(Sphere));
-		memcpy((char*)data + m_world.spheres.size() * sizeof(Sphere),
-			m_world.materialManager.lambertianMaterials.data(), m_world.materialManager.lambertianMaterials.size() * sizeof(LambertianMaterialProperties));
+
+		const size_t spheresSize = m_world.spheres.size() * sizeof(Sphere);
+		memcpy(data, m_world.spheres.data(), spheresSize);
+
+		const size_t lambertianMaterialsSize = m_world.materialManager.lambertianMaterials.size() * sizeof(LambertianMaterialProperties);
+		memcpy((char*)data + spheresSize,
+			m_world.materialManager.lambertianMaterials.data(),
+			lambertianMaterialsSize);
+
+		const size_t metalMaterialsSize = m_world.materialManager.metalMaterials.size() * sizeof(MetalMaterialProperties);
+		memcpy((char*)data + spheresSize + lambertianMaterialsSize,
+			m_world.materialManager.metalMaterials.data(),
+			metalMaterialsSize);
+
 		vkUnmapMemory(m_vkDevice, stagingBufferMemory);
 	}
 
@@ -1475,12 +1486,19 @@ void VulkanAppBase::CreateComputePipeline()
 	lambertMaterialsBinding.binding = 3;
 	lambertMaterialsBinding.descriptorCount = 1;
 
-	std::array<VkDescriptorSetLayoutBinding, 4> setLayoutBindings
+	VkDescriptorSetLayoutBinding metalMaterialsBinding{};
+	metalMaterialsBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	metalMaterialsBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	metalMaterialsBinding.binding = 4;
+	metalMaterialsBinding.descriptorCount = 1;
+
+	std::array<VkDescriptorSetLayoutBinding, 5> setLayoutBindings
 	{
 		storageImageBinding,
 		uboBinding,
 		spheresBinding,
-		lambertMaterialsBinding
+		lambertMaterialsBinding,
+		metalMaterialsBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
@@ -1567,12 +1585,14 @@ void VulkanAppBase::CreateComputePipeline()
 		computeWriteDescriptorSets.push_back(ssboSpheres);
 	}
 
+	VkDeviceSize lambertianMaterialsSize =
+		std::max<VkDeviceSize>(1, sizeof(LambertianMaterialProperties) * m_world.materialManager.lambertianMaterials.size());
+
 	{
 		VkDescriptorBufferInfo ssboLambertianMaterialsBufferInfo{};
 		ssboLambertianMaterialsBufferInfo.buffer = m_computeSSOBuffer;
 		ssboLambertianMaterialsBufferInfo.offset = spheresSize;
-		ssboLambertianMaterialsBufferInfo.range = std::max<VkDeviceSize>(1,
-			sizeof(LambertianMaterialProperties) * m_world.materialManager.lambertianMaterials.size());
+		ssboLambertianMaterialsBufferInfo.range = std::max<VkDeviceSize>(1, lambertianMaterialsSize);
 
 		VkWriteDescriptorSet ssboLambertianMaterials{};
 		ssboLambertianMaterials.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1583,6 +1603,24 @@ void VulkanAppBase::CreateComputePipeline()
 		ssboLambertianMaterials.pBufferInfo = &ssboLambertianMaterialsBufferInfo;
 
 		computeWriteDescriptorSets.push_back(ssboLambertianMaterials);
+	}
+
+	{
+		VkDescriptorBufferInfo ssboMetalMaterialsBufferInfo{};
+		ssboMetalMaterialsBufferInfo.buffer = m_computeSSOBuffer;
+		ssboMetalMaterialsBufferInfo.offset = spheresSize + lambertianMaterialsSize;
+		ssboMetalMaterialsBufferInfo.range = std::max<VkDeviceSize>(1,
+			sizeof(MetalMaterialProperties) * m_world.materialManager.metalMaterials.size());
+
+		VkWriteDescriptorSet ssboMetalMaterials{};
+		ssboMetalMaterials.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ssboMetalMaterials.dstSet = m_computeDescriptorSet;
+		ssboMetalMaterials.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		ssboMetalMaterials.dstBinding = 4;
+		ssboMetalMaterials.descriptorCount = 1;
+		ssboMetalMaterials.pBufferInfo = &ssboMetalMaterialsBufferInfo;
+
+		computeWriteDescriptorSets.push_back(ssboMetalMaterials);
 	}
 
 	vkUpdateDescriptorSets(m_vkDevice,

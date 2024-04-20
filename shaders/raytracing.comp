@@ -35,6 +35,17 @@ layout(std140, binding = 3) readonly buffer lambertianMaterialsIn
    lambertianMaterial lambertianMaterials[];
 };
 
+struct metalMaterial
+{
+    vec3 albedo;
+    float fuzz;
+};
+
+layout(std140, binding = 4) readonly buffer metalMaterialsIn 
+{
+   metalMaterial metalMaterials[];
+};
+
 float pi = 3.1415926535897932384626433832795;
 float half_pi = pi / 2.0;
 
@@ -271,10 +282,10 @@ void main()
                 else if (result.material_type == metal_material_type)
                 {
                     vec3 reflected = reflect(r.direction, result.normal);
-                    float fuzz = 0.1;
+                    float fuzz = metalMaterials[result.material_idx].fuzz;
                     reflected += (fuzz * random_unit_vector(state));
 
-                    color *= vec3(0.6, 0.6, 0.6);
+                    color *= metalMaterials[result.material_idx].albedo;
 
                     if (dot(reflected, result.normal) > 0.0)
                     {
