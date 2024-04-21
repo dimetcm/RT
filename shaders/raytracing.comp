@@ -46,6 +46,19 @@ layout(std140, binding = 4) readonly buffer metalMaterialsIn
    metalMaterial metalMaterials[];
 };
 
+struct dielectricMaterial
+{
+    float refraction_index;
+    float _dummy1;
+    float _dummy2;
+    float _dummy3;
+};
+
+layout(std140, binding = 5) readonly buffer dielectricMaterialsIn 
+{
+   dielectricMaterial dielectricMaterials[];
+};
+
 float pi = 3.1415926535897932384626433832795;
 float half_pi = pi / 2.0;
 
@@ -53,6 +66,7 @@ float infinity = 1.0 / 0.0;
 
 const uint lambert_material_type = 0x00000000u;
 const uint metal_material_type = 0x00000001u;
+const uint dielectric_material_type = 0x00000002u;
 
 bool is_nearly_zero(vec3 v)
 {
@@ -295,6 +309,13 @@ void main()
                     {
                         break;
                     }
+                }
+                else if (result.material_type == dielectric_material_type)
+                {
+                    float refraction_index = dielectricMaterials[result.material_idx].refraction_index;
+                    float ri = result.front_face ? (1.0/refraction_index) : refraction_index;
+                    vec3 refracted = refract(r.direction, result.normal, ri);
+                    r = ray(result.point + refracted * 0.0001f, refracted);
                 }
             }
             else

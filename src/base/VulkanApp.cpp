@@ -1275,7 +1275,8 @@ void VulkanAppBase::CreateComputeShaderSSBO()
 	VkDeviceSize bufferSize = std::max<VkDeviceSize>(1u,
 		m_world.spheres.size() * sizeof(Sphere) + 
 		m_world.materialManager.lambertianMaterials.size() * sizeof(LambertianMaterialProperties) +
-		m_world.materialManager.metalMaterials.size() * sizeof(MetalMaterialProperties));
+		m_world.materialManager.metalMaterials.size() * sizeof(MetalMaterialProperties) + 
+		m_world.materialManager.dielectricMaterials.size() * sizeof(DielectricMaterialProperties));
 
 	// Create a staging buffer used to upload data to the gpu
 	VkBuffer stagingBuffer;
@@ -1300,6 +1301,11 @@ void VulkanAppBase::CreateComputeShaderSSBO()
 		memcpy((char*)data + spheresSize + lambertianMaterialsSize,
 			m_world.materialManager.metalMaterials.data(),
 			metalMaterialsSize);
+
+		const size_t dielectricMaterialsSize = m_world.materialManager.dielectricMaterials.size() * sizeof(DielectricMaterialProperties);
+		memcpy((char*)data + spheresSize + lambertianMaterialsSize + metalMaterialsSize,
+			m_world.materialManager.dielectricMaterials.data(),
+			dielectricMaterialsSize);
 
 		vkUnmapMemory(m_vkDevice, stagingBufferMemory);
 	}
@@ -1492,13 +1498,20 @@ void VulkanAppBase::CreateComputePipeline()
 	metalMaterialsBinding.binding = 4;
 	metalMaterialsBinding.descriptorCount = 1;
 
-	std::array<VkDescriptorSetLayoutBinding, 5> setLayoutBindings
+	VkDescriptorSetLayoutBinding dielectricMaterialsBinding{};
+	dielectricMaterialsBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	dielectricMaterialsBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	dielectricMaterialsBinding.binding = 5;
+	dielectricMaterialsBinding.descriptorCount = 1;
+
+	std::array<VkDescriptorSetLayoutBinding, 6> setLayoutBindings
 	{
 		storageImageBinding,
 		uboBinding,
 		spheresBinding,
 		lambertMaterialsBinding,
-		metalMaterialsBinding
+		metalMaterialsBinding,
+		dielectricMaterialsBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo descriptorLayout{};
@@ -1605,12 +1618,13 @@ void VulkanAppBase::CreateComputePipeline()
 		computeWriteDescriptorSets.push_back(ssboLambertianMaterials);
 	}
 
+	VkDeviceSize metalMaterialsSize =
+		std::max<VkDeviceSize>(1, sizeof(MetalMaterialProperties) * m_world.materialManager.metalMaterials.size());
 	{
 		VkDescriptorBufferInfo ssboMetalMaterialsBufferInfo{};
 		ssboMetalMaterialsBufferInfo.buffer = m_computeSSOBuffer;
 		ssboMetalMaterialsBufferInfo.offset = spheresSize + lambertianMaterialsSize;
-		ssboMetalMaterialsBufferInfo.range = std::max<VkDeviceSize>(1,
-			sizeof(MetalMaterialProperties) * m_world.materialManager.metalMaterials.size());
+		ssboMetalMaterialsBufferInfo.range = metalMaterialsSize;
 
 		VkWriteDescriptorSet ssboMetalMaterials{};
 		ssboMetalMaterials.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1621,6 +1635,25 @@ void VulkanAppBase::CreateComputePipeline()
 		ssboMetalMaterials.pBufferInfo = &ssboMetalMaterialsBufferInfo;
 
 		computeWriteDescriptorSets.push_back(ssboMetalMaterials);
+	}
+
+	VkDeviceSize dielectricMaterialsSize =
+		std::max<VkDeviceSize>(1, sizeof(DielectricMaterialProperties) * m_world.materialManager.dielectricMaterials.size());
+	{
+		VkDescriptorBufferInfo ssboDielectricMaterialsBufferInfo{};
+		ssboDielectricMaterialsBufferInfo.buffer = m_computeSSOBuffer;
+		ssboDielectricMaterialsBufferInfo.offset = spheresSize + lambertianMaterialsSize + metalMaterialsSize;
+		ssboDielectricMaterialsBufferInfo.range = dielectricMaterialsSize;
+
+		VkWriteDescriptorSet ssboDielectricMaterials{};
+		ssboDielectricMaterials.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ssboDielectricMaterials.dstSet = m_computeDescriptorSet;
+		ssboDielectricMaterials.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		ssboDielectricMaterials.dstBinding = 5;
+		ssboDielectricMaterials.descriptorCount = 1;
+		ssboDielectricMaterials.pBufferInfo = &ssboDielectricMaterialsBufferInfo;
+
+		computeWriteDescriptorSets.push_back(ssboDielectricMaterials);
 	}
 
 	vkUpdateDescriptorSets(m_vkDevice,

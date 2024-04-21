@@ -7,7 +7,8 @@
 enum class MaterialType : uint32_t
 {
     Lambertian,
-    Metal
+    Metal,
+    Dielectric
 };
 
 struct LambertianMaterialProperties 
@@ -20,6 +21,14 @@ struct MetalMaterialProperties
 {
     glm::vec3 albedo;
     float fuzz = 0.5f;
+};
+
+struct DielectricMaterialProperties
+{
+    float refractionIndex = 1.0f;
+    float _dummy1;
+    float _dummy2;
+    float _dummy3;
 };
 
 struct MaterialInfo
@@ -50,6 +59,14 @@ struct MaterialManager
         return info;
     }
 
+    MaterialInfo CreateMaterial(const DielectricMaterialProperties& propertis)
+    {
+        MaterialInfo info(MaterialType::Dielectric, static_cast<uint32_t>(dielectricMaterials.size()));
+        dielectricMaterials.push_back(propertis);
+        return info;
+    }
+
     std::vector<LambertianMaterialProperties> lambertianMaterials;
     std::vector<MetalMaterialProperties> metalMaterials;
+    std::vector<DielectricMaterialProperties> dielectricMaterials;
 };
