@@ -13,7 +13,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPSTR cmdLine, i
     MaterialInfo mi3 = world.materialManager.CreateMaterial(LambertianMaterialProperties(glm::vec3(0.2f, 0.1f, 0.5f)));
     MaterialInfo mi4 = world.materialManager.CreateMaterial(LambertianMaterialProperties(glm::vec3(0.3f, 0.3f, 0.9f)));
     MaterialInfo mi5 = world.materialManager.CreateMaterial(LambertianMaterialProperties(glm::vec3(0.8f, 0.4f, 0.3f)));
-    MaterialInfo mi6 = world.materialManager.CreateMaterial(DielectricMaterialProperties(1.5f));
+    MaterialInfo mi6 = world.materialManager.CreateMaterial(DielectricMaterialProperties(1.0f / 1.33f));
 
     SpherePrimitive sp1(glm::vec3(+0.0f, 0.0f, -1.0f), 0.5f);
     SpherePrimitive sp2(glm::vec3(-2.0f, 0.0f, -1.0f), 0.5f);

@@ -196,6 +196,14 @@ raycast_result raycast_sphere(ray r, interval i, sphere s)
     }
 }
 
+float reflectance(float cosine, float refraction_index)
+{
+     // Use Schlick's approximation for reflectance.
+    float r0 = (1.0f - refraction_index) / (1.0f + refraction_index);
+    r0 = r0 * r0;
+    return r0 + (1.0f - r0) * pow((1.0f - cosine), 5.0f);
+}
+
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 void main()
 {
@@ -234,10 +242,11 @@ void main()
     vec2 state = gl_GlobalInvocationID.xy;
     
     // multisampling
-    uint samples_count = 10;
+    uint samples_count = 5;
     float sample_weight = 1.0f / (samples_count * 1.0f);
 
     vec4 final_color = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    bool passed_through_dielectric = false;
 
     for (int i = 0; i < samples_count; ++i)
     {
@@ -253,7 +262,7 @@ void main()
         ray r = ray(cam_pos, normalize(ray_direction));
 
         vec3 color = vec3(1.0f, 1.0f, 1.0f);
-        const uint max_depth = 10;
+        const uint max_depth = 15;
 
         int d = 0;
         for (; d < max_depth; ++d)
@@ -319,8 +328,11 @@ void main()
                     float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 
                     bool cannot_refract = ri * sin_theta > 1.0;
-                    vec3 direction = cannot_refract ? reflect(r.direction, result.normal) : refract(r.direction, result.normal, ri);
+                    float k = random(state);
+                    vec3 direction = (cannot_refract || reflectance(cos_theta, ri) > k) ?
+                        reflect(r.direction, result.normal) : refract(r.direction, result.normal, ri);
                     r = ray(result.point + direction * 0.0001f, direction);
+                    passed_through_dielectric = true;
                 }
             }
             else
@@ -333,7 +345,7 @@ void main()
             }
         }
 
-        if (d == max_depth)
+        if (d == max_depth && !passed_through_dielectric)
         {
             final_color = vec4(0.0, 0.0, 0.0, 0.0);
         }
