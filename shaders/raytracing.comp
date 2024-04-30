@@ -100,6 +100,11 @@ vec3 random_on_hemisphere(vec3 normal, inout vec2 state)
         return -on_unit_sphere;
 }
 
+vec3 random_in_unit_disk(inout vec2 state)
+{
+    return vec3((random(state) - 0.5) * 2,  (random(state) - 0.5) * 2, 0);
+}
+
 struct interval
 {
     float min;
@@ -209,17 +214,21 @@ void main()
 {
     ivec2 dim = imageSize(resultImage);
 
+    float image_height = int(dim.x / ubo.aspect_ratio);
+
     // Camera
     vec3 cam_pos = ubo.camera_position.xyz;
     vec3 cam_dir = ubo.camera_direction.xyz;
-    vec3 vup = vec3(0,1,0);     // Camera-relative "up" direction
+    vec3 vup = vec3(0, 1, 0);     // Camera-relative "up" direction
 
-    float focal_length = 1.0;
+    float defocus_angle = 3.6;  // Variation angle of rays through each pixel
+    float focus_dist = 3.0;    // Distance from camera lookfrom point to plane of perfect focus
+
     float vfov = half_pi;
     float h = tan(vfov / 2.0);
 
-    float viewport_height = 2.0 * h * focal_length;
-    float viewport_width = viewport_height * ubo.aspect_ratio;
+    float viewport_height =  2 * h * focus_dist;
+    float viewport_width = viewport_height * float(dim.x) / float(image_height);
     
     vec3 w = -cam_dir;
     vec3 u = cross(vup, w);
@@ -235,11 +244,15 @@ void main()
 
     // Calculate the location of the upper left pixel.
     vec3 viewport_upper_left = cam_pos
-                             - focal_length * w - viewport_u / 2.0f - viewport_v / 2.0;
+                             - focus_dist * w - viewport_u / 2.0f - viewport_v / 2.0;
     vec3 pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
     // add time?
     vec2 state = gl_GlobalInvocationID.xy;
+
+    float defocus_radius = focus_dist * tan(radians(defocus_angle / 2.0));
+    vec3 defocus_disk_u = u * defocus_radius;
+    vec3 defocus_disk_v = v * defocus_radius;
     
     // multisampling
     uint samples_count = 5;
@@ -257,9 +270,18 @@ void main()
         vec3 pixel_center = pixel00_loc + 
             ((gl_GlobalInvocationID.x + xoffset) * pixel_delta_u) +
             ((gl_GlobalInvocationID.y + yoffset) * pixel_delta_v);
-        vec3 ray_direction = pixel_center - cam_pos;
 
-        ray r = ray(cam_pos, normalize(ray_direction));
+        vec3 ray_origin = cam_pos;
+        if (defocus_angle > 0)
+        {
+            vec3 p = random_in_unit_disk(state);
+            ray_origin = cam_pos + (p[0] * defocus_disk_u) + (p[1] * defocus_disk_v);
+        }
+
+        vec3 ray_direction = pixel_center - ray_origin;
+
+
+        ray r = ray(ray_origin, normalize(ray_direction));
 
         vec3 color = vec3(1.0f, 1.0f, 1.0f);
         const uint max_depth = 15;

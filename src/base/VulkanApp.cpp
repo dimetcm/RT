@@ -1766,8 +1766,10 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 
 void VulkanAppBase::UpdateCamera(float deltaTime)
 {
-	const float cameraSpeed = 10000.0f * deltaTime;
+	const float cameraSpeed = 100000.0f * deltaTime;
 	const glm::vec3 upVector(0.0f, 1.0f, 0.0f);
+
+	m_world.camera.direction = glm::normalize(m_world.camera.direction);
 
 	if (m_input.forwardPressed)
 	{
