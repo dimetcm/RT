@@ -7,6 +7,7 @@ project(${NAME})
 
 include_directories(src/base)
 include_directories(external/glm)
+include_directories(external/imgui)
 
 # Use FindVulkan module added with CMAKE 3.7
 if (NOT CMAKE_VERSION VERSION_LESS 3.7.0)
@@ -36,11 +37,9 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-file(GLOB SOURCE *.cpp )
+file(GLOB SOURCE *.cpp)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
 add_subdirectory(src/apps)
 add_subdirectory(src/base)
-
-
