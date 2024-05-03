@@ -6,7 +6,9 @@ layout (binding = 1) uniform UBO
 {
     vec4 camera_position;
     vec4 camera_direction;
-	float aspect_ratio;
+	float aspect_ratio;    
+    float defocus_angle;  // Variation angle of rays through each pixel
+    float focus_dist;    // Distance from camera lookfrom point to plane of perfect focuі
 } ubo;
 
 struct sphere
@@ -221,13 +223,10 @@ void main()
     vec3 cam_dir = ubo.camera_direction.xyz;
     vec3 vup = vec3(0, 1, 0);     // Camera-relative "up" direction
 
-    float defocus_angle = 3.6;  // Variation angle of rays through each pixel
-    float focus_dist = 3.0;    // Distance from camera lookfrom point to plane of perfect focus
-
     float vfov = half_pi;
     float h = tan(vfov / 2.0);
 
-    float viewport_height =  2 * h * focus_dist;
+    float viewport_height =  2 * h * ubo.focus_dist;
     float viewport_width = viewport_height * float(dim.x) / float(image_height);
     
     vec3 w = -cam_dir;
@@ -244,13 +243,13 @@ void main()
 
     // Calculate the location of the upper left pixel.
     vec3 viewport_upper_left = cam_pos
-                             - focus_dist * w - viewport_u / 2.0f - viewport_v / 2.0;
+                             - ubo.focus_dist * w - viewport_u / 2.0f - viewport_v / 2.0;
     vec3 pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
     // add time?
     vec2 state = gl_GlobalInvocationID.xy;
 
-    float defocus_radius = focus_dist * tan(radians(defocus_angle / 2.0));
+    float defocus_radius = ubo.focus_dist * tan(radians(ubo.defocus_angle / 2.0));
     vec3 defocus_disk_u = u * defocus_radius;
     vec3 defocus_disk_v = v * defocus_radius;
     
@@ -272,7 +271,7 @@ void main()
             ((gl_GlobalInvocationID.y + yoffset) * pixel_delta_v);
 
         vec3 ray_origin = cam_pos;
-        if (defocus_angle > 0)
+        if (ubo.defocus_angle > 0)
         {
             vec3 p = random_in_unit_disk(state);
             ray_origin = cam_pos + (p[0] * defocus_disk_u) + (p[1] * defocus_disk_v);

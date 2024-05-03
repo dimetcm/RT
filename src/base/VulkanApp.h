@@ -136,7 +136,9 @@ private:
 		{
 			glm::vec4 cameraPosition;
 			glm::vec4 cameraDirection;
-			float aspectRatio = 1.0f;
+			float aspectRatio = 1.0f;	
+		    float defocus_angle = 1.0f;  // Variation angle of rays through each pixel
+    		float focus_dist = 3.0;    // Distance from camera lookfrom point to plane of perfect focus
 		} ubo;
 	} m_computeUBO;
 
