@@ -3,6 +3,8 @@
 #include "CommandLineArgs.h"
 #include "CommandLineOptions.h"
 
+#include "UIOverlay.h"
+
 #include <vulkan/vulkan.h>
 
 #include <glm/glm.hpp>
@@ -47,11 +49,8 @@ private:
 	void CreateComputeShaderRenderTarget();
 	void CreateComputeShaderUBO();
 	void CreateComputeShaderSSBO();
+	void CreateUIOverlay();
 	
-	void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-		VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
-	void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-
 	void CleanupSwapChain(VkSwapchainKHR swapChain);
 
 	void ResizeWindow(uint32_t width, uint32_t height);
@@ -62,8 +61,7 @@ private:
 	void Update(float deltaTime);
 	void UpdateCamera(float deltaTime);
 
-	uint32_t GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
-	private:
+private:
 	HWND m_hwnd;
 	HINSTANCE m_hInstance;
 
@@ -164,6 +162,8 @@ private:
 		bool forwardPressed = false;
 		bool backPressed = false;
 	} m_input;
+
+	UIOverlay m_uiOverlay;
 
 	friend LRESULT WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };

@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <assert.h>
 #include <string>
+#include <iostream>
 
 namespace VulkanUtils
 {
@@ -15,6 +16,22 @@ namespace VulkanUtils
 
 	VkPipelineShaderStageCreateInfo CreateShaderStage(VkDevice device, const std::string& fileName, VkShaderStageFlagBits stage);
 	void DestroyShaderStage(VkDevice device, VkPipelineShaderStageCreateInfo shaderStage);
+
+	uint32_t GetDeviceMemoryTypeIndex(VkPhysicalDevice device, uint32_t typeBits, VkMemoryPropertyFlags properties);
+
+	VkBuffer CreateBuffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice,
+		VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory);
+
+	void CopyBuffer(VkDevice vkDevice, VkQueue queue, VkCommandPool commandPool,
+		VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+
+	VkCommandBuffer CreateCommandeBuffer(VkDevice logicalDevice, VkCommandPool pool, VkCommandBufferLevel level);
+
+	void SetImageLayout(VkCommandBuffer cmdbuffer, VkImage image, VkImageAspectFlags aspectMask,
+		VkImageLayout oldImageLayout, VkImageLayout newImageLayout,
+		VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask);
+
+	std::string GetShadersPath();	
 }
 
 #define VK_CHECK_RESULT_MSG(f, errorDesciption)															\

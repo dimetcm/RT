@@ -1,6 +1,7 @@
 #include "VulkanApp.h"
 #include "Win32Helpers.h"
 #include "VulkanUtils.h"
+#include "VulkanDebugUtils.h"
 #include "World.h"
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -13,8 +14,6 @@
 #include <algorithm>
 #include <array>
 
-#include <VulkanDebugUtils.h>
-
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
@@ -26,11 +25,6 @@ const std::vector<const char*> validationLayers = {
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
-
-static std::string GetShadersPath()
-{
-	return "../../../shaders/";
-}
 
 struct QueueFamilyIndices
 {
@@ -82,26 +76,6 @@ static QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 	return indices;
 }
 
-uint32_t VulkanAppBase::GetDeviceMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const
-{
-	VkPhysicalDeviceMemoryProperties memoryProperties;
-	vkGetPhysicalDeviceMemoryProperties(m_vkPhysicalDevice, &memoryProperties);
-
-	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
-	{
-		if ((typeBits & 1) == 1)
-		{
-			if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties)
-			{
-				return i;
-			}
-		}
-		typeBits >>= 1;
-	}
-
-	return -1;
-}
-
 VulkanAppBase::VulkanAppBase(World& world, const std::string& appName)
 	: m_appName(appName)
 	, m_world(world)
@@ -109,6 +83,7 @@ VulkanAppBase::VulkanAppBase(World& world, const std::string& appName)
 
 VulkanAppBase::~VulkanAppBase()
 {
+	m_uiOverlay.Deinit(m_vkDevice);
 	CleanupSwapChain(m_swapChain);
 
 	vkDestroyBuffer(m_vkDevice, m_computeSSOBuffer, nullptr);
@@ -1084,7 +1059,7 @@ void VulkanAppBase::CreateComputeShaderRenderTarget()
 	VkMemoryAllocateInfo memAllocInfo{};
 	memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	memAllocInfo.allocationSize = memReqs.size;
-	memAllocInfo.memoryTypeIndex = GetDeviceMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	memAllocInfo.memoryTypeIndex = VulkanUtils::GetDeviceMemoryTypeIndex(m_vkPhysicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
 	VkDeviceMemory deviceMemory;
 	VK_CHECK_RESULT(vkAllocateMemory(m_vkDevice, &memAllocInfo, nullptr, &deviceMemory));
@@ -1203,71 +1178,14 @@ void VulkanAppBase::CreateComputeShaderUBO()
 		memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		memAllocInfo.allocationSize = memReqs.size;
 		// Find a memory type index that fits the properties of the buffer
-		memAllocInfo.memoryTypeIndex = GetDeviceMemoryType(memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		memAllocInfo.memoryTypeIndex = VulkanUtils::GetDeviceMemoryTypeIndex(
+			m_vkPhysicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
 		VK_CHECK_RESULT(vkAllocateMemory(m_vkDevice, &memAllocInfo, nullptr, &m_computeUBO.vkBuffersMemory[i]));
 
 		// Attach the memory to the buffer object
 		VK_CHECK_RESULT(vkBindBufferMemory(m_vkDevice, m_computeUBO.vkBuffers[i], m_computeUBO.vkBuffersMemory[i], 0));
 	}
-}
-
-void VulkanAppBase::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-	VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
-{
-	VkBufferCreateInfo bufferInfo{};
-	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferInfo.size = size;
-	bufferInfo.usage = usage;
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-	VK_CHECK_RESULT_MSG(vkCreateBuffer(m_vkDevice, &bufferInfo, nullptr, &buffer), "Failed to create buffer!");
-
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(m_vkDevice, buffer, &memRequirements);
-
-	VkMemoryAllocateInfo allocInfo{};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memRequirements.size;
-	allocInfo.memoryTypeIndex = GetDeviceMemoryType(memRequirements.memoryTypeBits, properties);
-
-	VK_CHECK_RESULT_MSG(vkAllocateMemory(m_vkDevice, &allocInfo, nullptr, &bufferMemory),
-		"Failed to allocate buffer memory!");
-
-	vkBindBufferMemory(m_vkDevice, buffer, bufferMemory, 0);
-}
-
-void VulkanAppBase::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
-{
-	VkCommandBufferAllocateInfo allocInfo{};
-	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	allocInfo.commandPool = m_commandPool;
-	allocInfo.commandBufferCount = 1;
-
-	VkCommandBuffer commandBuffer;
-	vkAllocateCommandBuffers(m_vkDevice, &allocInfo, &commandBuffer);
-
-	VkCommandBufferBeginInfo beginInfo{};
-	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-	vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-	VkBufferCopy copyRegion{};
-	copyRegion.size = size;
-	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-	vkEndCommandBuffer(commandBuffer);
-
-	VkSubmitInfo submitInfo{};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &commandBuffer;
-
-	vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-	vkQueueWaitIdle(m_graphicsQueue);
 }
 
 void VulkanAppBase::CreateComputeShaderSSBO()
@@ -1281,8 +1199,8 @@ void VulkanAppBase::CreateComputeShaderSSBO()
 	// Create a staging buffer used to upload data to the gpu
 	VkBuffer stagingBuffer;
 	VkDeviceMemory stagingBufferMemory;
-	CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+	stagingBuffer = VulkanUtils::CreateBuffer(m_vkPhysicalDevice, m_vkDevice, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBufferMemory);
 
 	if (!m_world.spheres.empty())
 	{
@@ -1310,10 +1228,10 @@ void VulkanAppBase::CreateComputeShaderSSBO()
 		vkUnmapMemory(m_vkDevice, stagingBufferMemory);
 	}
 
-	CreateBuffer(bufferSize,
+	m_computeSSOBuffer = VulkanUtils::CreateBuffer(m_vkPhysicalDevice, m_vkDevice, bufferSize,
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_computeSSOBuffer, m_computeSSOBufferMemory);
-	CopyBuffer(stagingBuffer, m_computeSSOBuffer, bufferSize);
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_computeSSOBufferMemory);
+	VulkanUtils::CopyBuffer(m_vkDevice, m_graphicsQueue, m_commandPool, stagingBuffer, m_computeSSOBuffer, bufferSize);
 
 	vkDestroyBuffer(m_vkDevice, stagingBuffer, nullptr);
 	vkFreeMemory(m_vkDevice, stagingBufferMemory, nullptr);
@@ -1377,8 +1295,8 @@ void VulkanAppBase::CreateGraphicsPipeline()
 	// Display pipeline
 	const std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
 	{
-		VulkanUtils::CreateShaderStage(m_vkDevice, GetShadersPath() + "texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-		VulkanUtils::CreateShaderStage(m_vkDevice, GetShadersPath() + "texture.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		VulkanUtils::CreateShaderStage(m_vkDevice, VulkanUtils::GetShadersPath() + "texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+		VulkanUtils::CreateShaderStage(m_vkDevice, VulkanUtils::GetShadersPath() + "texture.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 	};
 
 	// Binding 0 : Fragment shader image sampler
@@ -1534,7 +1452,7 @@ void VulkanAppBase::CreateComputePipeline()
 	computePipelineCreateInfo.layout = m_computePipelineLayout;
 	computePipelineCreateInfo.flags = 0;
 	computePipelineCreateInfo.stage =
-		VulkanUtils::CreateShaderStage(m_vkDevice, GetShadersPath() + "raytracing.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+		VulkanUtils::CreateShaderStage(m_vkDevice, VulkanUtils::GetShadersPath() + "raytracing.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
 
 	VK_CHECK_RESULT(vkCreateComputePipelines(m_vkDevice, nullptr, 1, &computePipelineCreateInfo, nullptr, &m_computePipeline));
 
@@ -1662,6 +1580,11 @@ void VulkanAppBase::CreateComputePipeline()
 	vkDestroyDescriptorSetLayout(m_vkDevice, descriptorSetLayout, nullptr);
 }
 
+void VulkanAppBase::CreateUIOverlay()
+{
+	m_uiOverlay.Init(m_vkPhysicalDevice, m_vkDevice, m_commandPool, m_graphicsQueue, m_renderPass);
+}
+
 void VulkanAppBase::Run()
 {
 	std::chrono::time_point<std::chrono::high_resolution_clock> frameTime =
@@ -1700,7 +1623,7 @@ void VulkanAppBase::RecordComputeCommandBuffer()
 	
 	VK_CHECK_RESULT(vkBeginCommandBuffer(m_computeCommandBuffers[m_currentFrame], &cmdBufInfo));
 		
-	VkImageMemoryBarrier imageMemoryBarrier = {};
+	VkImageMemoryBarrier imageMemoryBarrier{};
 	imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
 	imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -1758,6 +1681,8 @@ void VulkanAppBase::RecordGraphicsCommandBuffer(uint32_t imageIndex)
 
 	vkCmdDraw(m_graphicsCommandBuffers[m_currentFrame], 3, 1, 0, 0);
 
+	m_uiOverlay.Draw(m_vkPhysicalDevice, m_vkDevice, m_graphicsCommandBuffers[m_currentFrame]);
+	
 	vkCmdEndRenderPass(m_graphicsCommandBuffers[m_currentFrame]);
 
 	VK_CHECK_RESULT_MSG(vkEndCommandBuffer(m_graphicsCommandBuffers[m_currentFrame]),
@@ -1803,6 +1728,8 @@ void VulkanAppBase::UpdateCamera(float deltaTime)
 
 void VulkanAppBase::Update(float deltaTime)
 {
+	m_uiOverlay.Update(m_vkPhysicalDevice, m_vkDevice);
+
 	UpdateCamera(deltaTime);
 
 	m_computeUBO.ubo.cameraPosition = glm::vec4(m_world.camera.position, 0.0f);
@@ -1935,6 +1862,8 @@ void VulkanAppBase::Init(HINSTANCE hInstance, const CommandLineOptions& options)
 	CreateGraphicsPipeline();
 	CreateComputePipeline();
 	CreateFrameBuffers();
+
+	CreateUIOverlay();
 
 	m_lastFrameTime = std::chrono::high_resolution_clock::now();
 
