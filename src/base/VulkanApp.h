@@ -5,13 +5,17 @@
 
 #include "UIOverlay.h"
 
-#include <vulkan/vulkan.h>
 
-#include <glm/glm.hpp>
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
 
 #pragma comment(linker, "/subsystem:windows")
 #include <windows.h>
-#include <crtdbg.h>
+
+#include <vulkan/vulkan.h>
+
+#include <glm/glm.hpp>
 
 #include <optional>
 #include <chrono>
@@ -72,7 +76,7 @@ private:
 	VkInstance m_vkInstance;
 	VkPhysicalDevice m_vkPhysicalDevice;
 	// Vk logical device
-	VkDevice m_vkDevice;
+	VkDevice m_vkDevice = VK_NULL_HANDLE;
 	// Stores physical device properties (for e.g. checking device limits)
 	VkPhysicalDeviceProperties m_deviceProperties{};
 	// Stores the features available on the selected physical device (for e.g. checking if a feature is available)
@@ -178,14 +182,13 @@ int StartApp(World& world, HINSTANCE hInstance, const CommandLineArgs& args)
 	_CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 #endif
 
-	{
-		T app(world);
-		CommandLineOptions commandLineOptions;
-		app.RegisterCommandLineOptions(commandLineOptions);
-		commandLineOptions.Parse(args);
-		app.Init(hInstance, commandLineOptions);
-		app.Run();
-	}
+	T app(world);
+	CommandLineOptions commandLineOptions;
+	app.RegisterCommandLineOptions(commandLineOptions);
+	commandLineOptions.Parse(args);
+	app.Init(hInstance, commandLineOptions);
+	app.Run();
+
 	system("pause");
 	return 0;
 }

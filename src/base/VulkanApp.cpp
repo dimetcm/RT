@@ -14,6 +14,19 @@
 #include <algorithm>
 #include <array>
 
+
+struct DumpMemoryLeaks
+{
+    DumpMemoryLeaks() {}
+
+    ~DumpMemoryLeaks()
+    {
+        _CrtDumpMemoryLeaks();
+    }
+};
+
+DumpMemoryLeaks g_dumpMemoryLeaks;
+
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
@@ -84,6 +97,7 @@ VulkanAppBase::VulkanAppBase(World& world, const std::string& appName)
 VulkanAppBase::~VulkanAppBase()
 {
 	m_uiOverlay.Deinit(m_vkDevice);
+
 	CleanupSwapChain(m_swapChain);
 
 	vkDestroyBuffer(m_vkDevice, m_computeSSOBuffer, nullptr);

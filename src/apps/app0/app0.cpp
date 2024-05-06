@@ -1,3 +1,5 @@
+
+
 #include "VulkanApp.h"
 #include "World.h"
 
@@ -25,15 +27,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPSTR cmdLine, i
     SpherePrimitive sp6(glm::vec3(+0.75f, 0.0f, +0.5f), 0.5f);
     SpherePrimitive sp7(glm::vec3(-0.75f, 0.0f, +0.5f), 0.5f);
     SpherePrimitive sp8(glm::vec3(-0.75f, 0.0f, +0.5f), 0.4f);
-    
-    world.spheres.push_back({sp1, mi1});
-    world.spheres.push_back({sp2, mi2});
-    world.spheres.push_back({sp3, mi3});
-    world.spheres.push_back({sp4, mi4});
-    world.spheres.push_back({sp5, mi5});
-    world.spheres.push_back({sp6, mi6});
-    world.spheres.push_back({sp7, mi7});
-    world.spheres.push_back({sp8, mi8});
+
+    world.spheres.push_back({ sp1, mi1 });
+    world.spheres.push_back({ sp2, mi2 });
+    world.spheres.push_back({ sp3, mi3 });
+    world.spheres.push_back({ sp4, mi4 });
+    world.spheres.push_back({ sp5, mi5 });
+    world.spheres.push_back({ sp6, mi6 });
+    world.spheres.push_back({ sp7, mi7 });
+    world.spheres.push_back({ sp8, mi8 });
 
     return StartApp<VulkanAppBase>(world, hInstance, CommandLineArgs(__argc, __argv));
 }
